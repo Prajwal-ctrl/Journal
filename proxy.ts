@@ -36,10 +36,9 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  const {
-    data: { claims },
-  } = await supabase.auth.getClaims();
-  const authenticated = Boolean(claims?.sub);
+  const claimsResult = await supabase.auth.getClaims();
+  const claims = claimsResult.data?.claims;
+  const authenticated = Boolean(claims?.sub) && claims?.is_anonymous !== true;
 
   if (pathname === "/unlock" && authenticated) {
     return redirectWithRefreshedCookies(response, new URL("/", request.url));
