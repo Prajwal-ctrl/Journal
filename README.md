@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Life Archive
 
 A private journal and life archive built with Next.js, Supabase Auth, and Supabase Postgres.
@@ -24,3 +25,6 @@ Deploy the repository on Vercel. Add these environment variables for the Product
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (use the Supabase publishable key)
 
 The `.env.local` file is ignored by Git; never commit environment files or a Supabase secret key.
+=======
+# Journal
+>>>>>>> bd1afd3219cf4666df02fe030aa60fb627c1992f
