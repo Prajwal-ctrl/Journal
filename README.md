@@ -1,36 +1,26 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Life Archive
 
-## Getting Started
+A private journal and life archive built with Next.js, Supabase Auth, and Supabase Postgres.
 
-First, run the development server:
+## Local setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Install dependencies with `npm install`.
+2. Copy `.env.example` to `.env.local` and add your Supabase project URL and publishable key.
+3. Start the app with `npm run dev`.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The app uses the Supabase email/password account as the stable archive identity. Create the account once in the Supabase Dashboard under **Authentication → Users → Add user**, then sign in at `/unlock`. Do not enable public sign-ups for this personal archive.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The `public.archive_entries` table uses owner-scoped row-level security. The connected Supabase project already has this table and RLS enabled. For a new Supabase project, run [`supabase/setup.sql`](./supabase/setup.sql) in its SQL Editor.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Move existing anonymous entries
 
-## Learn More
+After creating the permanent Supabase user, copy its user UUID from **Authentication → Users**. If the project contains entries created by anonymous users, replace the UUID placeholder in [`supabase/migrate-anonymous-entries.sql`](./supabase/migrate-anonymous-entries.sql) and run that script once in the Supabase SQL Editor. It moves only rows owned by anonymous users to the permanent account.
 
-To learn more about Next.js, take a look at the following resources:
+## Deploy
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Deploy the repository on Vercel. Add these environment variables for the Production environment:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` (use the Supabase publishable key)
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The `.env.local` file is ignored by Git; never commit environment files or a Supabase secret key.
