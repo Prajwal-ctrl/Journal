@@ -19,6 +19,10 @@ import {
   Settings2,
   Tag,
   ListFilter,
+  ChevronDown,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
 } from "lucide-react";
 import JournalEditor from "@/components/JournalEditor";
 import ArchiveCollection from "@/components/ArchiveCollection";
@@ -44,8 +48,10 @@ type CustomSection = {
   tags: string[];
 };
 
-const customSectionCategories = [
-  ["all", "All entry types"],
+type CustomCategory = { id: string; value: string; name: string };
+type SidebarEntry = { id: string; title: string; category: string; tags: string[]; created_at: string | null };
+
+const builtInCategories = [
   ["journal", "Daily Journal"],
   ["memory", "Best Memories"],
   ["mistake", "Mistakes"],
@@ -62,6 +68,12 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [customSections, setCustomSections] = useState<CustomSection[]>([]);
+  const [customCategories, setCustomCategories] = useState<CustomCategory[]>([]);
+  const [sidebarEntries, setSidebarEntries] = useState<SidebarEntry[]>([]);
+  const [expandedSections, setExpandedSections] = useState<string[]>([]);
+  const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
+  const [categoryName, setCategoryName] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [sectionManagerOpen, setSectionManagerOpen] = useState(false);
   const [sectionName, setSectionName] = useState("");
   const [sectionCategory, setSectionCategory] = useState("all");
@@ -86,6 +98,35 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem("life-archive-categories");
+        if (!saved) return;
+        const value = JSON.parse(saved) as unknown;
+        if (Array.isArray(value)) setCustomCategories(value.filter((item): item is CustomCategory => typeof item?.id === "string" && typeof item?.value === "string" && typeof item?.name === "string"));
+      } catch {
+        // Keep built-in categories if browser storage contains invalid data.
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    let current = true;
+    async function loadSidebarEntries() {
+      try {
+        const response = await fetch("/api/entries", { cache: "no-store" });
+        const result = await response.json() as { entries?: SidebarEntry[] };
+        if (current && response.ok) setSidebarEntries(result.entries ?? []);
+      } catch {
+        // The sidebar remains usable if entry previews cannot be loaded.
+      }
+    }
+    loadSidebarEntries();
+    return () => { current = false; };
+  }, [active]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -132,6 +173,9 @@ export default function Home() {
     Mistakes: "mistake",
     "Lessons Learned": "lesson",
   };
+  const categoryLabels = Object.fromEntries([...builtInCategories, ...customCategories.map((category) => [category.value, category.name])]);
+  const sectionCategoryOptions: string[][] = [...builtInCategories, ...customCategories.map((category) => [category.value, category.name])];
+  const entryCategoryOptions: string[][] = [...builtInCategories, ...customCategories.map((category) => [category.value, category.name])];
   const currentCustomSection = customSections.find((section) => active === `custom:${section.id}`);
   const selectedNavigation =
     active === "Editor"
@@ -152,6 +196,49 @@ export default function Home() {
   function getNavigationIcon(item: string) {
     if (item === "Overview") return LayoutDashboard;
     return sections.find((section) => section.name === item)?.icon ?? (item.startsWith("custom:") ? Tag : LayoutDashboard);
+  }
+
+  function entriesForSection(key: string) {
+    const savedView = customSections.find((section) => key === `custom:${section.id}`);
+    const category = savedView ? savedView.category : key === "Life Timeline" ? "all" : categoryBySection[key] ?? "all";
+    const tags = savedView?.tags.map((tag) => tag.toLocaleLowerCase()) ?? [];
+    return sidebarEntries.filter((entry) =>
+      (category === "all" || entry.category === category)
+      && tags.every((tag) => entry.tags.some((entryTag) => entryTag.toLocaleLowerCase() === tag)),
+    );
+  }
+
+  function toggleExpandedSection(key: string) {
+    if (sidebarCollapsed) setSidebarCollapsed(false);
+    setExpandedSections((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+  }
+
+  function openEntryFromSidebar(entry: SidebarEntry) {
+    setSearch(entry.title);
+    setActive("Life Timeline");
+    setMenuOpen(false);
+  }
+
+  function renderNavigationItem(item: { key: string; label: string }, mobile = false) {
+    const Icon = getNavigationIcon(item.key);
+    const selected = selectedNavigation === item.key;
+    const expanded = expandedSections.includes(item.key);
+    const matchingEntries = entriesForSection(item.key);
+    const buttonClass = `group flex w-full min-w-0 flex-1 items-center rounded-xl border py-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 ${mobile ? "gap-3 px-3 text-sm" : sidebarCollapsed ? "justify-center px-0 text-[13px]" : "gap-3 px-3 text-[13px]"} ${selected ? "border-[#c5a77d]/15 bg-[#c5a77d]/[.09] text-[#e4c89b] shadow-[inset_2px_0_0_0_#c5a77d]" : "border-transparent text-[#999b92] hover:bg-white/[.035] hover:text-[#eee9de]"}`;
+    return (
+      <div key={item.key} className="min-w-0">
+        <div className="flex items-center gap-1">
+          <button type="button" aria-current={selected ? "page" : undefined} title={!mobile && sidebarCollapsed ? item.label : undefined} onClick={() => selectSection(item.key)} className={buttonClass}>
+            <Icon size={16} strokeWidth={1.6} />
+            <span className={!mobile && sidebarCollapsed ? "sr-only" : "truncate"}>{item.label}</span>
+          </button>
+          {item.key !== "Overview" && <button type="button" aria-label={`${expanded ? "Collapse" : "Expand"} ${item.label}`} aria-expanded={expanded} onClick={() => toggleExpandedSection(item.key)} className={`flex size-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-white/[.05] hover:text-[#d5b989] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/50 ${expanded ? "rotate-180" : ""}`}><ChevronDown size={16} /></button>}
+        </div>
+        {expanded && <div className={`mb-2 mt-1 space-y-0.5 border-l border-white/10 pb-1 pl-3 ${mobile ? "ml-4" : "ml-4"}`}>
+          {matchingEntries.length === 0 ? <p className="px-2 py-2 text-[11px] text-gray-600">No notes in this section yet</p> : matchingEntries.map((entry) => <button key={entry.id} type="button" onClick={() => openEntryFromSidebar(entry)} title={entry.title} className="block w-full truncate rounded-md px-2 py-2 text-left text-[11px] leading-4 text-gray-500 transition hover:bg-white/[.04] hover:text-[#e7e1d5]">{entry.title}</button>)}
+        </div>}
+      </div>
+    );
   }
 
   function openEditor(category: string) {
@@ -176,6 +263,50 @@ export default function Home() {
     } catch {
       // Sections remain available until the page is closed if storage is unavailable.
     }
+  }
+
+  function persistCustomCategories(next: CustomCategory[]) {
+    setCustomCategories(next);
+    try { localStorage.setItem("life-archive-categories", JSON.stringify(next)); } catch { /* Keep current-session choices. */ }
+  }
+
+  function saveCustomCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = categoryName.trim();
+    if (!name) return;
+    if (editingCategoryId) {
+      persistCustomCategories(customCategories.map((item) => item.id === editingCategoryId ? { ...item, name } : item));
+    } else {
+      const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const normalized = name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 34) || "category";
+      let value = `custom_${normalized}`;
+      let suffix = 2;
+      while ([...builtInCategories.map(([key]) => key), ...customCategories.map((item) => item.value)].includes(value)) value = `custom_${normalized}_${suffix++}`;
+      persistCustomCategories([...customCategories, { id, value, name }]);
+    }
+    setCategoryName("");
+    setEditingCategoryId(null);
+  }
+
+  function moveCustomSection(id: string, destination: number) {
+    const currentIndex = customSections.findIndex((section) => section.id === id);
+    if (currentIndex < 0 || destination < 0 || destination >= customSections.length) return;
+    const next = [...customSections];
+    const [section] = next.splice(currentIndex, 1);
+    next.splice(destination, 0, section);
+    persistCustomSections(next);
+  }
+
+  function dropCustomSection(targetId: string) {
+    if (!draggingSectionId || draggingSectionId === targetId) return;
+    const sourceIndex = customSections.findIndex((section) => section.id === draggingSectionId);
+    const targetIndex = customSections.findIndex((section) => section.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const next = [...customSections];
+    const [section] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, section);
+    persistCustomSections(next);
+    setDraggingSectionId(null);
   }
 
   function resetSectionForm() {
@@ -230,7 +361,8 @@ export default function Home() {
               </label>
               <label className="block text-xs text-gray-300">Entry type
                 <select value={sectionCategory} onChange={(event) => setSectionCategory(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2.5 text-sm text-white outline-none focus:border-[#c5a77d]/50">
-                  {customSectionCategories.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  <option value="all">All entry types</option>
+                  {sectionCategoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
               <label className="block text-xs text-gray-300">Tags to include <span className="text-gray-500">(optional, comma separated)</span>
@@ -244,7 +376,22 @@ export default function Home() {
 
             <div className="mt-6">
               <h3 className="text-[10px] tracking-[.18em] text-gray-500">YOUR SECTIONS · {customSections.length}</h3>
-              {customSections.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-white/10 p-5 text-center text-xs text-gray-500">Your custom sections will show up here.</p> : <ul className="mt-3 divide-y divide-white/[.07] rounded-xl border border-white/[.07]">{customSections.map((section) => <li key={section.id} className="flex items-center justify-between gap-3 p-3.5"><div className="min-w-0"><p className="truncate text-sm text-gray-200">{section.name}</p><p className="mt-1 truncate text-[11px] text-gray-500">{customSectionCategories.find(([value]) => value === section.category)?.[1] ?? "All entry types"}{section.tags.length ? ` · ${section.tags.map((tag) => `#${tag}`).join(" ")}` : ""}</p></div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => editCustomSection(section)} aria-label={`Edit ${section.name}`} className="rounded-lg px-2.5 py-2 text-xs text-gray-400 hover:bg-white/5 hover:text-white">Edit</button><button type="button" onClick={() => deleteCustomSection(section)} aria-label={`Delete ${section.name}`} className="rounded-lg px-2.5 py-2 text-xs text-rose-300 hover:bg-rose-400/10">Delete</button></div></li>)}</ul>}
+              {customSections.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-white/10 p-5 text-center text-xs text-gray-500">Your custom sections will show up here.</p> : <ul className="mt-3 divide-y divide-white/[.07] rounded-xl border border-white/[.07]">{customSections.map((section, index) => <li key={section.id} draggable onDragStart={() => setDraggingSectionId(section.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropCustomSection(section.id)} onDragEnd={() => setDraggingSectionId(null)} className={`flex items-center justify-between gap-2 p-3.5 ${draggingSectionId === section.id ? "opacity-40" : ""}`}><div className="flex min-w-0 items-center gap-2"><GripVertical size={16} className="shrink-0 cursor-grab text-gray-600" /><div className="min-w-0"><p className="truncate text-sm text-gray-200">{section.name}</p><p className="mt-1 truncate text-[11px] text-gray-500">{section.category === "all" ? "All entry types" : categoryLabels[section.category] ?? "All entry types"}{section.tags.length ? ` · ${section.tags.map((tag) => `#${tag}`).join(" ")}` : ""}</p></div></div><div className="flex shrink-0 items-center gap-0.5"><button type="button" disabled={index === 0} onClick={() => moveCustomSection(section.id, index - 1)} aria-label={`Move ${section.name} up`} className="rounded-lg p-2 text-gray-400 hover:bg-white/5 disabled:opacity-25"><ArrowUp size={14} /></button><button type="button" disabled={index === customSections.length - 1} onClick={() => moveCustomSection(section.id, index + 1)} aria-label={`Move ${section.name} down`} className="rounded-lg p-2 text-gray-400 hover:bg-white/5 disabled:opacity-25"><ArrowDown size={14} /></button><button type="button" onClick={() => editCustomSection(section)} aria-label={`Edit ${section.name}`} className="rounded-lg px-2.5 py-2 text-xs text-gray-400 hover:bg-white/5 hover:text-white">Edit</button><button type="button" onClick={() => deleteCustomSection(section)} aria-label={`Delete ${section.name}`} className="rounded-lg px-2.5 py-2 text-xs text-rose-300 hover:bg-rose-400/10">Delete</button></div></li>)}</ul>}
+            </div>
+
+            <div className="mt-7 border-t border-white/[.07] pt-6">
+              <h3 className="text-[10px] tracking-[.18em] text-gray-500">ENTRY CATEGORIES</h3>
+              <p className="mt-2 text-xs leading-5 text-gray-500">Add your own category and it will appear in the entry and section filters.</p>
+              <form onSubmit={saveCustomCategory} className="mt-3 flex gap-2">
+                <input required maxLength={36} value={categoryName} onChange={(event) => setCategoryName(event.target.value)} placeholder="e.g. Health, Travel" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#101210] px-3 py-2.5 text-sm text-white outline-none focus:border-[#c5a77d]/50" />
+                <button type="submit" className="rounded-full bg-[#cfb184] px-4 py-2 text-xs font-medium text-[#171812] hover:bg-[#dfc49a]">{editingCategoryId ? "Save" : "Add"}</button>
+                {editingCategoryId && <button type="button" onClick={() => { setEditingCategoryId(null); setCategoryName(""); }} className="rounded-full border border-white/10 px-3 py-2 text-xs text-gray-300">Cancel</button>}
+              </form>
+              {customCategories.length > 0 && <ul className="mt-3 divide-y divide-white/[.07] rounded-xl border border-white/[.07]">{customCategories.map((item) => {
+                const useCount = sidebarEntries.filter((entry) => entry.category === item.value).length;
+                const sectionUses = customSections.some((section) => section.category === item.value);
+                return <li key={item.id} className="flex items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="truncate text-sm text-gray-200">{item.name}</p><p className="text-[11px] text-gray-500">{useCount} {useCount === 1 ? "entry" : "entries"}</p></div><div className="flex gap-1"><button type="button" onClick={() => { setEditingCategoryId(item.id); setCategoryName(item.name); }} className="rounded-lg px-2.5 py-2 text-xs text-gray-400 hover:bg-white/5 hover:text-white">Rename</button><button type="button" disabled={useCount > 0 || sectionUses} title={useCount > 0 || sectionUses ? "Reassign entries and sections before deleting this category" : "Delete category"} onClick={() => persistCustomCategories(customCategories.filter((category) => category.id !== item.id))} className="rounded-lg px-2.5 py-2 text-xs text-rose-300 hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-30">Delete</button></div></li>;
+              })}</ul>}
             </div>
             <p className="mt-4 text-[11px] text-gray-600">Custom sections are saved in this browser. Deleting a section never deletes its entries.</p>
           </section>
@@ -331,29 +478,10 @@ export default function Home() {
         <nav
           id="mobile-archive-navigation"
           aria-label="Archive navigation"
-          className="archive-menu-enter relative z-20 space-y-2 border-b border-white/[.07] bg-[#151815] p-5 shadow-[0_24px_60px_rgba(0,0,0,.38)] md:hidden"
+          className="archive-menu-enter relative z-20 max-h-[75vh] space-y-2 overflow-y-auto border-b border-white/[.07] bg-[#151815] p-5 shadow-[0_24px_60px_rgba(0,0,0,.38)] md:hidden"
         >
           <p className="px-3 pb-1 text-[10px] tracking-[.22em] text-[#70746a]">YOUR ARCHIVE</p>
-          {navigation.map((item) => {
-            const Icon = getNavigationIcon(item.key);
-            const selected = selectedNavigation === item.key;
-
-            return (
-              <button
-                key={item.key}
-                aria-current={selected ? "page" : undefined}
-                onClick={() => selectSection(item.key)}
-                className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 ${
-                  selected
-                    ? "border-[#c5a77d]/20 bg-[#c5a77d]/[.09] text-[#e0c397]"
-                    : "border-transparent text-gray-300 hover:bg-white/5 hover:text-[#e0c397]"
-                }`}
-              >
-                <Icon size={17} strokeWidth={1.6} />
-                {item.label}
-              </button>
-            );
-          })}
+          {navigation.map((item) => renderNavigationItem(item, true))}
           <button
             onClick={() => openEditor("journal")}
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#cfb184] px-4 py-3 text-sm font-medium text-[#171812] transition hover:bg-[#dfc49a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eee9de]"
@@ -373,12 +501,7 @@ export default function Home() {
           sidebarCollapsed ? "w-[84px] p-4" : "w-[280px] p-8"
         }`}
       >
-        <div className={`flex min-h-9 items-center ${sidebarCollapsed ? "justify-center" : "justify-between gap-3"}`}>
-          {!sidebarCollapsed && (
-            <span className="font-serif text-[1.2rem] tracking-[.12em]">
-              LIFE<span className="text-[#c5a77d]">.</span>ARCHIVE
-            </span>
-          )}
+        <div className={`flex min-h-9 items-center ${sidebarCollapsed ? "justify-center" : "justify-start gap-3"}`}>
           <button
             type="button"
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -389,6 +512,11 @@ export default function Home() {
           >
             <Menu size={17} strokeWidth={1.6} />
           </button>
+          {!sidebarCollapsed && (
+            <span className="font-serif text-[1.2rem] tracking-[.12em]">
+              LIFE<span className="text-[#c5a77d]">.</span>ARCHIVE
+            </span>
+          )}
         </div>
 
         {!sidebarCollapsed && (
@@ -401,31 +529,7 @@ export default function Home() {
           <p className="mb-3 mt-14 px-3 text-[10px] tracking-[.24em] text-[#686c63]">YOUR ARCHIVE</p>
         )}
         <nav aria-label="Archive navigation" className={`space-y-1.5 ${sidebarCollapsed ? "mt-10" : ""}`}>
-          {navigation.map((item) => (
-            (() => {
-              const Icon = getNavigationIcon(item.key);
-              const selected = selectedNavigation === item.key;
-
-              return (
-                <button
-                  key={item.key}
-                  aria-current={selected ? "page" : undefined}
-                  title={sidebarCollapsed ? item.label : undefined}
-                  onClick={() => selectSection(item.key)}
-                  className={`group flex w-full items-center rounded-xl border py-3 text-left text-[13px] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 ${
-                    sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
-                  } ${
-                    selected
-                      ? "border-[#c5a77d]/15 bg-[#c5a77d]/[.09] text-[#e4c89b] shadow-[inset_2px_0_0_0_#c5a77d]"
-                      : "border-transparent text-[#999b92] hover:bg-white/[.035] hover:text-[#eee9de]"
-                  }`}
-                >
-                  <Icon size={16} strokeWidth={1.6} />
-                  <span className={sidebarCollapsed ? "sr-only" : "truncate"}>{item.label}</span>
-                </button>
-              );
-            })()
-          ))}
+          {navigation.map((item) => renderNavigationItem(item))}
         </nav>
 
         <button type="button" onClick={() => setSectionManagerOpen(true)} title={sidebarCollapsed ? "Manage sections" : undefined} className={`mt-3 flex w-full items-center rounded-xl border border-dashed border-white/10 py-3 text-left text-xs text-gray-400 transition hover:border-[#c5a77d]/35 hover:bg-white/[.035] hover:text-[#d5b989] ${sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"}`}>
@@ -461,19 +565,23 @@ export default function Home() {
           <JournalEditor
             key={editorCategory}
             initialCategory={editorCategory}
+            categories={entryCategoryOptions.map(([value, label]) => ({ value, label }))}
+            categoryNames={categoryLabels}
             onBack={() => setActive("Overview")}
           />
         ) : active !== "Overview" ? (
           <ArchiveCollection
-            key={`${active}-${currentCustomSection?.category ?? ""}-${currentCustomSection?.tags.join("|") ?? ""}`}
+            key={`${active}-${currentCustomSection?.category ?? ""}-${currentCustomSection?.tags.join("|") ?? ""}-${active === "Life Timeline" ? search : ""}`}
             title={currentCustomSection?.name ?? active}
             description={currentCustomSection ? `Your saved view${currentCustomSection.tags.length ? ` · ${currentCustomSection.tags.map((tag) => `#${tag}`).join(" ")}` : " across your archive"}.` : sections.find((section) => section.name === active)?.desc ?? "Explore your personal history"}
-            category={currentCustomSection ? currentCustomSection.category === "all" ? null : currentCustomSection.category as "journal" | "memory" | "mistake" | "lesson" | "reflection" | "future" : active === "Life Timeline" ? null : (categoryBySection[active] as "memory" | "mistake" | "lesson" | undefined) ?? null}
+            category={currentCustomSection ? currentCustomSection.category === "all" ? null : currentCustomSection.category : active === "Life Timeline" ? null : categoryBySection[active] ?? null}
+            categoryNames={categoryLabels}
+            categoryOptions={entryCategoryOptions.map(([value, label]) => ({ value, label }))}
             initialTags={currentCustomSection?.tags ?? []}
             onSaveTags={currentCustomSection ? (tags) => persistCustomSections(customSections.map((section) => section.id === currentCustomSection.id ? { ...section, tags } : section)) : undefined}
             initialSearch={active === "Life Timeline" ? search : ""}
             onBack={() => setActive("Overview")}
-            onCreate={() => openEditor(categoryBySection[active] ?? "journal")}
+            onCreate={() => openEditor(categoryBySection[active] ?? (currentCustomSection && currentCustomSection.category !== "all" ? currentCustomSection.category : "journal"))}
           />
         ) : (
           <>
@@ -614,3 +722,4 @@ export default function Home() {
     </main>
   );
 }
+

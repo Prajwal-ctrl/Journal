@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, CalendarDays, Save, Sparkles } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckSquare2, Circle, ListChecks, Pencil, Save, Sparkles, SquarePen, Trash2, X } from "lucide-react";
+import type { ArchiveEntryType } from "@/lib/archive-entry-types";
 
 type ArchiveEntry = {
   id: string;
@@ -10,21 +11,35 @@ type ArchiveEntry = {
   category: string;
   mood: string | null;
   tags: string[];
+  entry_type: ArchiveEntryType;
+  is_completed: boolean;
   created_at: string | null;
 };
+
+const entryTypeOptions: { value: ArchiveEntryType; label: string; description: string; icon: typeof SquarePen }[] = [
+  { value: "paragraph", label: "Paragraph", description: "A full journal entry", icon: SquarePen },
+  { value: "quick_note", label: "Quick note", description: "A single line to remember", icon: Circle },
+  { value: "todo", label: "To-do", description: "A task you can check off", icon: CheckSquare2 },
+];
 
 export default function JournalEditor({
   onBack,
   initialCategory = "journal",
+  categories,
+  categoryNames = {},
 }: {
   onBack: () => void;
   initialCategory?: string;
+  categories: { value: string; label: string }[];
+  categoryNames?: Record<string, string>;
 }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState(initialCategory);
   const [mood, setMood] = useState("Calm");
   const [tags, setTags] = useState("");
+  const [entryType, setEntryType] = useState<ArchiveEntryType>("paragraph");
+  const [isCompleted, setIsCompleted] = useState(false);
 
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
@@ -36,6 +51,7 @@ export default function JournalEditor({
   const [entries, setEntries] = useState<ArchiveEntry[]>([]);
   const [loadingEntries, setLoadingEntries] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,16 +86,75 @@ export default function JournalEditor({
   }, []);
 
   function handlePreview() {
-    if (!title.trim() || !content.trim()) {
-      alert("Please add a title and write something first.");
+    if (!(title.trim() || (entryType !== "paragraph" && content.trim())) || !content.trim()) {
+      alert("Please add some text before previewing.");
       return;
     }
     setPreview(true);
   }
 
+  function beginEdit(entry: ArchiveEntry) {
+    setEditingId(entry.id);
+    setTitle(entry.title);
+    setContent(entry.content);
+    setCategory(entry.category);
+    setMood(entry.mood ?? "");
+    setTags(entry.tags.join(", "));
+    setEntryType(entry.entry_type);
+    setIsCompleted(entry.is_completed);
+    setError(null);
+    setSaveMessage(null);
+    setPreview(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setTitle("");
+    setContent("");
+    setCategory(initialCategory);
+    setMood("Calm");
+    setTags("");
+    setEntryType("paragraph");
+    setIsCompleted(false);
+    setPreview(false);
+    setError(null);
+    setSaveMessage(null);
+  }
+
+  async function deleteEntry(entry: ArchiveEntry) {
+    if (!window.confirm(`Delete “${entry.title}” permanently? This cannot be undone.`)) return;
+    try {
+      const response = await fetch(`/api/entries/${entry.id}`, { method: "DELETE" });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Your entry could not be deleted.");
+      setEntries((current) => current.filter((item) => item.id !== entry.id));
+      if (editingId === entry.id) cancelEdit();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Your entry could not be deleted.");
+    }
+  }
+
+  async function toggleTodo(entry: ArchiveEntry) {
+    const nextCompleted = !entry.is_completed;
+    try {
+      const response = await fetch(`/api/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: nextCompleted, mood: entry.mood ?? "", tags: entry.tags }),
+      });
+      const result = await response.json() as { entry?: ArchiveEntry; error?: string };
+      if (!response.ok || !result.entry) throw new Error(result.error ?? "The to-do could not be updated.");
+      setEntries((current) => current.map((item) => item.id === entry.id ? result.entry! : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The to-do could not be updated.");
+    }
+  }
+
   async function handleSave() {
-    if (!title.trim() || !content.trim()) {
-      setError("Please add a title and write something before saving.");
+    const entryTitle = title.trim() || (entryType !== "paragraph" ? content.trim().slice(0, 120) : "");
+    if (!entryTitle || !content.trim()) {
+      setError("Please add some text before saving.");
       return;
     }
 
@@ -88,13 +163,15 @@ export default function JournalEditor({
     setSaveMessage(null);
 
     try {
-      const response = await fetch("/api/entries", {
-        method: "POST",
+      const response = await fetch(editingId ? `/api/entries/${editingId}` : "/api/entries", {
+        method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
+          title: entryTitle,
           content,
           category,
+          entry_type: entryType,
+          is_completed: isCompleted,
           mood,
           tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
         }),
@@ -113,11 +190,12 @@ export default function JournalEditor({
         result.entry!,
         ...current.filter((entry) => entry.id !== result.entry!.id),
       ]);
+      setEditingId(null);
       setPreview(true);
       setSaveMessage(
         result.metadataSaved === false
           ? "Entry saved. Mood and tags are not available in the current database schema yet."
-          : "Entry saved to your private archive.",
+          : editingId ? "Entry updated in your private archive." : "Entry saved to your private archive.",
       );
     } catch (cause) {
       setError(
@@ -157,8 +235,20 @@ export default function JournalEditor({
       </div>
 
       <div className="mt-10 space-y-9">
+        <fieldset>
+          <legend className="text-xs tracking-widest text-[#c5a77d]">WHAT ARE YOU ADDING?</legend>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {entryTypeOptions.map(({ value, label, description, icon: Icon }) => (
+              <button key={value} type="button" aria-pressed={entryType === value} onClick={() => { setEntryType(value); if (value !== "paragraph") { setTitle(""); setContent((current) => current.slice(0, 240)); setMood(""); } if (value !== "todo") setIsCompleted(false); }} className={`flex items-start gap-3 rounded-xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/50 ${entryType === value ? "border-[#c5a77d]/45 bg-[#c5a77d]/[.08]" : "border-white/[.08] bg-white/[.015] hover:border-white/20"}`}>
+                <Icon size={17} className={entryType === value ? "mt-0.5 text-[#d5b989]" : "mt-0.5 text-gray-500"} />
+                <span><span className="block text-sm text-[#eee9de]">{label}</span><span className="mt-1 block text-[11px] leading-4 text-gray-500">{description}</span></span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
         {/* Title */}
-        <div>
+        {entryType === "paragraph" && <div>
           <label
             className="text-xs text-[#c5a77d]
             tracking-widest"
@@ -172,7 +262,7 @@ export default function JournalEditor({
             placeholder="Give this moment a name..."
             className="w-full border-b border-white/[.1] bg-transparent py-4 font-serif text-2xl font-normal text-[#eee9de] outline-none transition placeholder:font-sans placeholder:text-lg placeholder:text-[#565950] focus:border-[#c5a77d]/70 md:text-3xl"
           />
-        </div>
+        </div>}
 
         {/* Category */}
         <div>
@@ -188,12 +278,7 @@ export default function JournalEditor({
             onChange={(e) => setCategory(e.target.value)}
             className="mt-3 w-full rounded-xl border border-white/[.09] bg-[#171a17] p-3.5 text-sm text-[#d2cfc4] outline-none transition focus:border-[#c5a77d]/40 md:w-72"
           >
-            <option value="journal">Daily Journal</option>
-            <option value="memory">Best Memory</option>
-            <option value="mistake">Mistake</option>
-            <option value="lesson">Lesson Learned</option>
-            <option value="reflection">Reflection</option>
-            <option value="future">Future Me</option>
+            {categories.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </div>
 
@@ -203,10 +288,10 @@ export default function JournalEditor({
             className="text-xs text-[#c5a77d]
             tracking-widest"
           >
-            YOUR STORY
+            {entryType === "paragraph" ? "YOUR STORY" : entryType === "todo" ? "TASK" : "QUICK NOTE"}
           </label>
 
-          <textarea
+          {entryType === "paragraph" ? <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder={`What happened today?
@@ -219,14 +304,16 @@ What do you want to remember?
 Write freely. This is your space.`}
             rows={12}
             className="mt-4 w-full resize-y rounded-[1.2rem] border border-white/[.08] bg-[#171a17] p-5 text-[15px] leading-8 text-[#d2cfc4] outline-none transition placeholder:text-[#676a60] focus:border-[#c5a77d]/35 sm:p-6"
-          />
+          /> : <input value={content} maxLength={240} onChange={(event) => setContent(event.target.value)} placeholder={entryType === "todo" ? "What do you need to do?" : "Write a quick note..."} className="mt-4 w-full rounded-xl border border-white/[.08] bg-[#171a17] px-5 py-4 text-base text-[#d2cfc4] outline-none transition placeholder:text-[#676a60] focus:border-[#c5a77d]/35" />}
           <p className="text-xs text-gray-600 mt-2">
-            {content.length} characters
+            {entryType === "paragraph" ? `${content.length} characters` : `${content.length}/240 characters · title is generated from this line`}
           </p>
         </div>
 
+        {entryType === "todo" && <label className="inline-flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={isCompleted} onChange={(event) => setIsCompleted(event.target.checked)} className="size-4 accent-[#c5a77d]" /> Mark this task complete</label>}
+
         {/* Mood */}
-        <div>
+        {entryType === "paragraph" && <div>
           <label
             className="text-xs text-[#c5a77d]
             tracking-widest"
@@ -258,10 +345,10 @@ Write freely. This is your space.`}
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* Tags */}
-        <div>
+        {entryType === "paragraph" && <div>
           <label
             className="text-xs text-[#c5a77d]
             tracking-widest"
@@ -275,7 +362,7 @@ Write freely. This is your space.`}
             placeholder="friends, work, family, travel..."
             className="mt-3 w-full rounded-xl border border-white/[.09] bg-[#171a17] p-4 text-sm text-[#d2cfc4] outline-none transition placeholder:text-[#676a60] focus:border-[#c5a77d]/35"
           />
-        </div>
+        </div>}
 
         {/* Preview */}
         <div className="border-t border-white/10 pt-7">
@@ -292,8 +379,9 @@ Write freely. This is your space.`}
               className="flex items-center gap-3 rounded-full bg-[#cfb184] px-7 py-3 text-[13px] font-medium text-[#171812] shadow-[0_8px_28px_rgba(197,167,125,.12)] transition hover:-translate-y-0.5 hover:bg-[#dfc49a] disabled:cursor-wait disabled:opacity-60"
             >
               <Save size={17} />
-              {saving ? "Saving…" : "Save entry"}
+              {saving ? "Saving…" : editingId ? "Save changes" : "Save entry"}
             </button>
+            {editingId && <button type="button" onClick={cancelEdit} disabled={saving} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-5 py-3 text-[13px] text-gray-300 hover:bg-white/5 disabled:opacity-50"><X size={15} /> Cancel edit</button>}
           </div>
 
           {error && (
@@ -314,9 +402,9 @@ Write freely. This is your space.`}
               <p className="text-xs text-[#c5a77d] tracking-widest">
                 ENTRY PREVIEW
               </p>
-              <h2 className="text-2xl">{title}</h2>
+              <h2 className="text-2xl">{title.trim() || (entryType !== "paragraph" ? content.trim().slice(0, 120) : "Untitled entry")}</h2>
               <p className="text-xs text-gray-500">
-                {today} · {category} · {mood}
+                {today} · {categoryNames[category] ?? category} · {entryTypeOptions.find((item) => item.value === entryType)?.label}{mood ? ` · ${mood}` : ""}
               </p>
               <p
                 className="text-sm text-gray-300 whitespace-pre-wrap
@@ -359,7 +447,13 @@ Write freely. This is your space.`}
                 className="rounded-[1.2rem] border border-white/[.075] bg-[linear-gradient(145deg,rgba(31,35,30,.92),rgba(22,24,21,.96))] p-5"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h3 className="font-serif text-lg text-[#eee9de]">{entry.title}</h3>
+                  <div className="flex min-w-0 items-center gap-2">
+                    {entry.entry_type === "todo" && <button type="button" aria-label={entry.is_completed ? "Mark task incomplete" : "Mark task complete"} aria-pressed={entry.is_completed} onClick={() => toggleTodo(entry)} className="shrink-0 text-[#c5a77d]">{entry.is_completed ? <CheckSquare2 size={18} /> : <ListChecks size={18} />}</button>}
+                    <div className="min-w-0">
+                      <p className="text-[9px] uppercase tracking-[.16em] text-[#c5a77d]">{entryTypeOptions.find((item) => item.value === entry.entry_type)?.label ?? "Paragraph"}</p>
+                      {entry.entry_type === "paragraph" && <h3 className="truncate font-serif text-lg text-[#eee9de]">{entry.title}</h3>}
+                    </div>
+                  </div>
                   <span className="text-xs text-gray-500">
                     {entry.created_at
                       ? new Date(entry.created_at).toLocaleDateString("en-IN", {
@@ -370,12 +464,16 @@ Write freely. This is your space.`}
                       : entry.category}
                   </span>
                 </div>
-                <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-[#a4a69c]">
+                <div className="mt-3 flex gap-2">
+                  <button type="button" onClick={() => beginEdit(entry)} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-xs text-gray-300 transition hover:border-[#c5a77d]/30 hover:text-[#d5b989]"><Pencil size={12} /> Edit</button>
+                  <button type="button" onClick={() => deleteEntry(entry)} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-xs text-gray-400 transition hover:border-rose-300/30 hover:text-rose-300"><Trash2 size={12} /> Delete</button>
+                </div>
+                <p className={`mt-2 ${entry.entry_type === "quick_note" ? "line-clamp-1" : "line-clamp-3"} whitespace-pre-wrap text-sm leading-6 text-[#a4a69c] ${entry.is_completed ? "text-gray-600 line-through" : ""}`}>
                   {entry.content}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
                   <span className="rounded-full border border-white/10 px-3 py-1">
-                    {entry.category}
+                    {categoryNames[entry.category] ?? entry.category}
                   </span>
                   {entry.mood && <span>{entry.mood}</span>}
                   {entry.tags.map((tag) => (
@@ -390,3 +488,4 @@ Write freely. This is your space.`}
     </div>
   );
 }
+

@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, Plus, Search } from "lucide-react";
+import { ArrowLeft, CalendarDays, Pencil, Plus, Search, Save, Trash2, X } from "lucide-react";
+import { CheckSquare2, ListChecks } from "lucide-react";
+import type { ArchiveEntryType } from "@/lib/archive-entry-types";
 
-type EntryCategory = "journal" | "memory" | "mistake" | "lesson" | "reflection" | "future";
+type EntryCategory = string;
+type CategoryOption = { value: string; label: string };
 
 type ArchiveEntry = {
   id: string;
@@ -12,6 +15,8 @@ type ArchiveEntry = {
   category: EntryCategory;
   mood: string | null;
   tags: string[];
+  entry_type: ArchiveEntryType;
+  is_completed: boolean;
   created_at: string | null;
 };
 
@@ -23,6 +28,8 @@ const categoryLabels: Record<EntryCategory, string> = {
   reflection: "Reflection",
   future: "Future Me",
 };
+
+const entryTypeLabels: Record<ArchiveEntryType, string> = { paragraph: "Paragraph", quick_note: "Quick note", todo: "To-do" };
 
 function formatDate(value: string | null, options: Intl.DateTimeFormatOptions) {
   if (!value) return "Undated";
@@ -38,6 +45,8 @@ export default function ArchiveCollection({
   category,
   initialTags = [],
   initialSearch = "",
+  categoryNames = {},
+  categoryOptions = [],
   onBack,
   onCreate,
   onSaveTags,
@@ -47,6 +56,8 @@ export default function ArchiveCollection({
   category: EntryCategory | null;
   initialTags?: string[];
   initialSearch?: string;
+  categoryNames?: Record<string, string>;
+  categoryOptions?: CategoryOption[];
   onBack: () => void;
   onCreate: () => void;
   onSaveTags?: (tags: string[]) => void;
@@ -56,6 +67,10 @@ export default function ArchiveCollection({
   const [selectedTags, setSelectedTags] = useState<string[]>(initialTags);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ title: "", content: "", category: "journal" as EntryCategory, entry_type: "paragraph" as ArchiveEntryType, is_completed: false, mood: "", tags: "" });
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -117,32 +132,114 @@ export default function ArchiveCollection({
     return [...groups.entries()];
   }, [category, visibleEntries]);
 
+  function beginEdit(entry: ArchiveEntry) {
+    setActionError(null);
+    setEditingId(entry.id);
+    setDraft({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: entry.is_completed, mood: entry.mood ?? "", tags: entry.tags.join(", ") });
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    setSavingId(editingId);
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/entries/${editingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...draft, mood: draft.mood.trim(), tags: draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean) }),
+      });
+      const result = (await response.json()) as { entry?: ArchiveEntry; error?: string; metadataSaved?: boolean };
+      if (!response.ok || !result.entry) throw new Error(result.error ?? "Your entry could not be updated.");
+      setEntries((current) => current.map((entry) => entry.id === editingId ? result.entry! : entry));
+      setEditingId(null);
+      if (!result.metadataSaved) setActionError("Entry updated. Mood and tags are not available in the current database schema.");
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "Your entry could not be updated.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function deleteEntry(entry: ArchiveEntry) {
+    if (!window.confirm(`Delete “${entry.title}” permanently? This cannot be undone.`)) return;
+    setSavingId(entry.id);
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/entries/${entry.id}`, { method: "DELETE" });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Your entry could not be deleted.");
+      setEntries((current) => current.filter((item) => item.id !== entry.id));
+      if (editingId === entry.id) setEditingId(null);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "Your entry could not be deleted.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function toggleTodo(entry: ArchiveEntry) {
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: !entry.is_completed, mood: entry.mood ?? "", tags: entry.tags }),
+      });
+      const result = await response.json() as { entry?: ArchiveEntry; error?: string };
+      if (!response.ok || !result.entry) throw new Error(result.error ?? "The to-do could not be updated.");
+      setEntries((current) => current.map((item) => item.id === entry.id ? result.entry! : item));
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "The to-do could not be updated.");
+    }
+  }
+
   function renderEntry(entry: ArchiveEntry) {
+    const isEditing = editingId === entry.id;
     return (
       <article
         key={entry.id}
         className="rounded-[1.35rem] border border-white/[.075] bg-[linear-gradient(145deg,rgba(31,35,30,.92),rgba(22,24,21,.96))] p-5 transition-colors hover:border-[#c5a77d]/20 md:p-7"
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-[.18em] text-[#c5a77d]">
-              {categoryLabels[entry.category] ?? "Archive Entry"}
-            </p>
-            <h3 className="mt-2 font-serif text-xl font-normal text-[#eee9de]">{entry.title}</h3>
-          </div>
+          {isEditing ? (
+            <div className="min-w-0 flex-1 space-y-3">
+              {draft.entry_type === "paragraph" && <><label className="sr-only" htmlFor={`entry-title-${entry.id}`}>Entry title</label><input id={`entry-title-${entry.id}`} maxLength={120} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 font-serif text-xl text-[#eee9de] outline-none focus:border-[#c5a77d]/45" /></>}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs text-gray-400">Type<select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 text-sm text-gray-200 outline-none">{categoryOptions.length ? categoryOptions.map(({ value, label }) => <option key={value} value={value}>{label}</option>) : Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                <label className="text-xs text-gray-400">Mood<input maxLength={80} value={draft.mood} onChange={(event) => setDraft({ ...draft, mood: event.target.value })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 text-sm text-gray-200 outline-none" /></label>
+              </div>
+              <label className="block text-xs text-gray-400">Entry format<select value={draft.entry_type} onChange={(event) => setDraft({ ...draft, entry_type: event.target.value as ArchiveEntryType, is_completed: event.target.value === "todo" ? draft.is_completed : false })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 text-sm text-gray-200 outline-none">{Object.entries(entryTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            </div>
+          ) : (
+            <div className="flex min-w-0 items-start gap-3">
+              {entry.entry_type === "todo" && <button type="button" aria-label={entry.is_completed ? "Mark task incomplete" : "Mark task complete"} aria-pressed={entry.is_completed} onClick={() => toggleTodo(entry)} className="mt-1 shrink-0 text-[#c5a77d]">{entry.is_completed ? <CheckSquare2 size={18} /> : <ListChecks size={18} />}</button>}
+              <div className="min-w-0"><p className="text-xs uppercase tracking-[.18em] text-[#c5a77d]">{categoryLabels[entry.category] ?? categoryNames[entry.category] ?? entry.category ?? "Archive Entry"} <span className="text-gray-600">· {entryTypeLabels[entry.entry_type]}</span></p>{entry.entry_type === "paragraph" && <h3 className="mt-2 font-serif text-xl font-normal text-[#eee9de]">{entry.title}</h3>}</div>
+            </div>
+          )}
           <span className="flex items-center gap-2 text-xs text-gray-500">
             <CalendarDays size={14} />
             {formatDate(entry.created_at, { day: "numeric", month: "short", year: "numeric" })}
           </span>
         </div>
-        <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-[#b4b4aa]">
-          {entry.content}
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+        {isEditing ? <>
+          <label className="sr-only" htmlFor={`entry-content-${entry.id}`}>Entry text</label>
+          {draft.entry_type === "paragraph" ? <textarea id={`entry-content-${entry.id}`} maxLength={20000} rows={8} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} className="mt-4 w-full resize-y rounded-xl border border-white/10 bg-[#101210] p-4 text-sm leading-7 text-[#d2cfc4] outline-none focus:border-[#c5a77d]/40" /> : <input id={`entry-content-${entry.id}`} maxLength={240} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value, title: event.target.value.slice(0, 120) })} className="mt-4 w-full rounded-xl border border-white/10 bg-[#101210] px-4 py-3 text-sm text-[#d2cfc4] outline-none focus:border-[#c5a77d]/40" />}
+          <label className="mt-3 block text-xs text-gray-400">Tags <input value={draft.tags} onChange={(event) => setDraft({ ...draft, tags: event.target.value })} placeholder="friends, work, travel" className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 text-sm text-gray-200 outline-none" /></label>
+        </> : <p className={`mt-4 whitespace-pre-wrap text-sm leading-7 text-[#b4b4aa] ${entry.is_completed ? "text-gray-600 line-through" : ""} ${entry.entry_type === "quick_note" ? "line-clamp-1" : ""}`}>{entry.content}</p>}
+        {!isEditing && <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-gray-500">
           {entry.mood && <span className="rounded-full border border-white/10 px-3 py-1">{entry.mood}</span>}
           {entry.tags.map((tag) => (
             <span key={`${entry.id}-${tag}`} className="rounded-full bg-white/5 px-3 py-1">#{tag}</span>
           ))}
+        </div>}
+        <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/[.06] pt-4">
+          {isEditing ? <>
+            <button type="button" disabled={savingId === entry.id} onClick={saveEdit} className="inline-flex items-center gap-2 rounded-full bg-[#cfb184] px-4 py-2 text-xs font-medium text-[#171812] transition hover:bg-[#dfc49a] disabled:opacity-50"><Save size={14} /> {savingId === entry.id ? "Saving…" : "Save changes"}</button>
+            <button type="button" disabled={savingId === entry.id} onClick={() => setEditingId(null)} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs text-gray-300 hover:bg-white/5 disabled:opacity-50"><X size={14} /> Cancel</button>
+          </> : <>
+            <button type="button" disabled={savingId === entry.id} onClick={() => beginEdit(entry)} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs text-gray-300 transition hover:border-[#c5a77d]/30 hover:text-[#d5b989] disabled:opacity-50"><Pencil size={13} /> Edit</button>
+            <button type="button" disabled={savingId === entry.id} onClick={() => deleteEntry(entry)} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs text-gray-400 transition hover:border-rose-300/30 hover:bg-rose-300/[.06] hover:text-rose-300 disabled:opacity-50"><Trash2 size={13} /> Delete</button>
+          </>}
         </div>
       </article>
     );
@@ -170,6 +267,8 @@ export default function ArchiveCollection({
           <Plus size={17} /> Add {category ? categoryLabels[category] : "entry"}
         </button>
       </div>
+
+      {actionError && <p role="alert" className="mt-5 rounded-xl border border-rose-300/15 bg-rose-300/[.05] px-4 py-3 text-sm text-rose-200">{actionError}</p>}
 
       <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-y border-white/10 py-5">
         <label className="flex min-w-64 flex-1 items-center gap-3 rounded-lg border border-white/10 px-4 py-3 md:max-w-xl">
@@ -231,3 +330,4 @@ export default function ArchiveCollection({
     </div>
   );
 }
+
