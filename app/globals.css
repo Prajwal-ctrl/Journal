@@ -8,6 +8,27 @@
   --archive-muted: #96958c;
 }
 
+/* User-selected accent shades replace the archive's default brass details. */
+[data-accent] [class*="text-[#c5a77d]"],
+[data-accent] [class*="text-[#cfb184]"],
+[data-accent] [class*="text-[#d5b989]"],
+[data-accent] [class*="text-[#cdb184]"],
+[data-accent] [class*="text-[#d9bd91]"],
+[data-accent] [class*="text-[#e0c397]"],
+[data-accent] [class*="text-[#e4c89b]"],
+[data-accent] [class*="text-[#c6b18e]"] {
+  color: var(--user-accent) !important;
+}
+
+[data-accent] [class~="bg-[#cfb184]"],
+[data-accent] [class~="bg-[#c5a77d]"] {
+  background-color: var(--user-accent) !important;
+}
+
+[data-accent] [class*="border-[#c5a77d]"] {
+  border-color: color-mix(in srgb, var(--user-accent) 42%, transparent) !important;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

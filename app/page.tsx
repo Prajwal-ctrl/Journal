@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   BookOpen,
   Heart,
@@ -16,6 +16,7 @@ import {
   Sparkles,
   LayoutDashboard,
   Feather,
+  Settings2,
 } from "lucide-react";
 import JournalEditor from "@/components/JournalEditor";
 import ArchiveCollection from "@/components/ArchiveCollection";
@@ -40,6 +41,40 @@ export default function Home() {
   const [editorCategory, setEditorCategory] = useState("journal");
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [preferences, setPreferences] = useState({ accent: "brass", textSize: "default", width: "wide" });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem("life-archive-preferences");
+        if (!saved) return;
+        const value = JSON.parse(saved) as Record<string, unknown>;
+        setPreferences({
+          accent: ["brass", "sage", "ocean", "rose"].includes(String(value.accent)) ? String(value.accent) : "brass",
+          textSize: ["small", "default", "large"].includes(String(value.textSize)) ? String(value.textSize) : "default",
+          width: ["focused", "wide", "full"].includes(String(value.width)) ? String(value.width) : "wide",
+        });
+      } catch {
+        // Use the default appearance if browser storage is unavailable.
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.style.fontSize = preferences.textSize === "small" ? "15px" : preferences.textSize === "large" ? "18px" : "16px";
+    return () => { document.documentElement.style.fontSize = ""; };
+  }, [preferences.textSize]);
+
+  function updatePreferences(next: typeof preferences) {
+    setPreferences(next);
+    try {
+      localStorage.setItem("life-archive-preferences", JSON.stringify(next));
+    } catch {
+      // Preferences still apply for this session if storage is unavailable.
+    }
+  }
 
   const navigation = ["Overview", ...sections.map((s) => s.name)];
   const categoryBySection: Record<string, string> = {
@@ -85,7 +120,49 @@ export default function Home() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#101210] text-[#eee9de]">
+    <main data-accent={preferences.accent} style={{ "--user-accent": ({ brass: "#c5a77d", sage: "#a3b990", ocean: "#8eafb9", rose: "#c8959b" } as Record<string, string>)[preferences.accent] } as CSSProperties} className="relative min-h-screen overflow-hidden bg-[#101210] text-[#eee9de]">
+      <button type="button" aria-label="Customize appearance" aria-expanded={customizeOpen} onClick={() => setCustomizeOpen((open) => !open)} className="fixed right-5 top-5 z-30 flex size-11 items-center justify-center rounded-full border border-white/10 bg-[#171a17]/90 text-[#c5a77d] shadow-lg backdrop-blur transition hover:border-[#c5a77d]/40 hover:bg-[#20251f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 md:right-8 md:top-8">
+        <Settings2 size={18} />
+      </button>
+      {customizeOpen && (
+        <>
+          <button aria-label="Close customization panel" onClick={() => setCustomizeOpen(false)} className="fixed inset-0 z-30 cursor-default bg-black/45 backdrop-blur-[2px]" />
+          <section aria-label="Customize your archive" className="fixed right-4 top-[4.5rem] z-40 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-[#171a17] p-5 shadow-[0_24px_80px_rgba(0,0,0,.55)] md:right-8 md:top-[5.5rem]">
+            <div className="flex items-start justify-between gap-3">
+              <div><p className="text-[10px] tracking-[.2em] text-[#c5a77d]">YOUR EXPERIENCE</p><h2 className="mt-1 font-serif text-2xl text-[#eee9de]">Customize</h2></div>
+              <button type="button" onClick={() => setCustomizeOpen(false)} className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-white/5 hover:text-white">Done</button>
+            </div>
+
+            <fieldset className="mt-6">
+              <legend className="text-xs text-[#b7b7ad]">Accent color</legend>
+              <div className="mt-3 flex gap-3">
+                {[{ id: "brass", name: "Brass", color: "#c5a77d" }, { id: "sage", name: "Sage", color: "#a3b990" }, { id: "ocean", name: "Ocean", color: "#8eafb9" }, { id: "rose", name: "Rose", color: "#c8959b" }].map((accent) => (
+                  <button key={accent.id} type="button" aria-label={`${accent.name} accent`} aria-pressed={preferences.accent === accent.id} onClick={() => updatePreferences({ ...preferences, accent: accent.id })} className={`size-9 rounded-full border-2 transition hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${preferences.accent === accent.id ? "border-white" : "border-transparent"}`} style={{ backgroundColor: accent.color }} />
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-6">
+              <legend className="text-xs text-[#b7b7ad]">Text size</legend>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[{ id: "small", name: "Small" }, { id: "default", name: "Default" }, { id: "large", name: "Large" }].map((size) => (
+                  <button key={size.id} type="button" aria-pressed={preferences.textSize === size.id} onClick={() => updatePreferences({ ...preferences, textSize: size.id })} className={`rounded-lg border px-2 py-2 text-xs transition ${preferences.textSize === size.id ? "border-[#c5a77d]/50 bg-[#c5a77d]/10 text-[#eee9de]" : "border-white/10 text-gray-400 hover:border-white/20"}`}>{size.name}</button>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-6">
+              <legend className="text-xs text-[#b7b7ad]">Content width</legend>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[{ id: "focused", name: "Focused" }, { id: "wide", name: "Wide" }, { id: "full", name: "Full" }].map((width) => (
+                  <button key={width.id} type="button" aria-pressed={preferences.width === width.id} onClick={() => updatePreferences({ ...preferences, width: width.id })} className={`rounded-lg border px-2 py-2 text-xs transition ${preferences.width === width.id ? "border-[#c5a77d]/50 bg-[#c5a77d]/10 text-[#eee9de]" : "border-white/10 text-gray-400 hover:border-white/20"}`}>{width.name}</button>
+                ))}
+              </div>
+            </fieldset>
+            <p className="mt-5 border-t border-white/[.07] pt-4 text-[11px] leading-5 text-gray-500">These choices are saved in this browser and stay private to this device.</p>
+          </section>
+        </>
+      )}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(ellipse_at_top,rgba(197,167,125,0.12),transparent_68%)]"
@@ -245,7 +322,7 @@ export default function Home() {
       </aside>
 
       {/* Main content */}
-      <section className={`relative z-0 mx-auto max-w-[1500px] px-5 py-7 transition-[margin] duration-300 ease-out sm:px-8 md:px-10 md:py-10 xl:px-16 ${sidebarCollapsed ? "md:ml-[84px]" : "md:ml-[280px]"}`}>
+      <section style={{ maxWidth: preferences.width === "focused" ? "1120px" : preferences.width === "full" ? "none" : "1500px" }} className={`relative z-0 mx-auto px-5 py-7 transition-[margin] duration-300 ease-out sm:px-8 md:px-10 md:py-10 xl:px-16 ${sidebarCollapsed ? "md:ml-[84px]" : "md:ml-[280px]"}`}>
         {active === "Editor" ? (
           <JournalEditor
             key={editorCategory}

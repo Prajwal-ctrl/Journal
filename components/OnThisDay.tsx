@@ -26,12 +26,14 @@ export default function OnThisDay() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [today, setToday] = useState<Date | null>(null);
 
   useEffect(() => {
     let active = true;
     async function load() {
       try {
         const response = await fetch("/api/entries", { cache: "no-store" });
+        if (active) setToday(new Date());
         if (!response.ok) return;
         const result = (await response.json()) as { entries?: Entry[] };
         if (active) setEntries(result.entries ?? []);
@@ -45,20 +47,16 @@ export default function OnThisDay() {
     return () => { active = false; };
   }, []);
 
-  const today = new Date();
-  const todayDay = today.getDate();
-  const todayMonth = today.getMonth();
-  const todayYear = today.getFullYear();
-  const memories = entries.filter((entry) => {
+  const memories = today ? entries.filter((entry) => {
     if (!entry.created_at) return false;
     const date = new Date(entry.created_at);
     return !Number.isNaN(date.getTime())
-      && date.getFullYear() < todayYear
-      && date.getMonth() === todayMonth
-      && date.getDate() === todayDay;
-  });
+      && date.getFullYear() < today.getFullYear()
+      && date.getMonth() === today.getMonth()
+      && date.getDate() === today.getDate();
+  }) : [];
 
-  if (loading || memories.length === 0) return null;
+  if (loading || !today || memories.length === 0) return null;
 
   return (
     <section aria-labelledby="on-this-day-title" className="mt-8 overflow-hidden rounded-[1.45rem] border border-[#c5a77d]/20 bg-[linear-gradient(115deg,rgba(36,39,31,.96),rgba(25,27,23,.98))] shadow-[0_18px_55px_rgba(0,0,0,.18)]">
