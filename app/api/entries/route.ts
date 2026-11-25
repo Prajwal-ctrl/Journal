@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireArchiveUser } from "@/lib/archive-api-auth";
 import { isValidArchiveCategory } from "@/lib/archive-categories";
 import { isArchiveEntryType } from "@/lib/archive-entry-types";
+import { parseArchiveSectionIds } from "@/lib/archive-section-ids";
 
 function databaseErrorMessage(code?: string) {
   if (code === "PGRST205" || code === "42P01") {
@@ -33,6 +34,7 @@ function publicEntry(row: Record<string, unknown>) {
     category: typeof row.category === "string" ? row.category : "journal",
     entry_type: typeof row.entry_type === "string" && isArchiveEntryType(row.entry_type) ? row.entry_type : "paragraph",
     is_completed: row.is_completed === true,
+    custom_sections: Array.isArray(row.custom_sections) ? row.custom_sections.filter((id): id is string => typeof id === "string") : [],
     mood: typeof row.mood === "string" ? row.mood : null,
     tags,
     created_at: typeof row.created_at === "string" ? row.created_at : null,
@@ -104,6 +106,7 @@ export async function POST(request: Request) {
   const category = typeof input.category === "string" ? input.category : "";
   const entryType = typeof input.entry_type === "string" ? input.entry_type : "paragraph";
   const isCompleted = input.is_completed === true;
+  const customSections = parseArchiveSectionIds(input.custom_sections);
   const mood = typeof input.mood === "string" ? input.mood.trim() : "";
   const tags = Array.isArray(input.tags)
     ? input.tags
@@ -133,11 +136,12 @@ export async function POST(request: Request) {
   if (!isArchiveEntryType(entryType)) {
     return NextResponse.json({ error: "Choose a valid entry format." }, { status: 400 });
   }
+  if (!customSections) return NextResponse.json({ error: "Invalid custom section assignment." }, { status: 400 });
   if (entryType !== "paragraph" && content.length > 240) {
     return NextResponse.json({ error: "Quick notes and to-dos must be 240 characters or fewer." }, { status: 400 });
   }
 
-  const entry = { title, content, category, entry_type: entryType, is_completed: isCompleted, mood: mood || null, tags };
+  const entry = { title, content, category, entry_type: entryType, is_completed: isCompleted, custom_sections: customSections, mood: mood || null, tags };
   let { data, error } = await session.supabase
     .from("archive_entries")
     .insert({ ...entry, owner_id: session.user.id })
@@ -151,7 +155,7 @@ export async function POST(request: Request) {
   ) {
     const fallback = await session.supabase
       .from("archive_entries")
-      .insert({ title, content, category, entry_type: entryType, is_completed: isCompleted, owner_id: session.user.id })
+      .insert({ title, content, category, entry_type: entryType, is_completed: isCompleted, custom_sections: customSections, owner_id: session.user.id })
       .select("*")
       .single();
 

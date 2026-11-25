@@ -13,6 +13,7 @@ type ArchiveEntry = {
   tags: string[];
   entry_type: ArchiveEntryType;
   is_completed: boolean;
+  custom_sections: string[];
   created_at: string | null;
 };
 
@@ -25,12 +26,16 @@ const entryTypeOptions: { value: ArchiveEntryType; label: string; description: s
 export default function JournalEditor({
   onBack,
   initialCategory = "journal",
+  initialCustomSectionId = "",
   categories,
+  sections,
   categoryNames = {},
 }: {
   onBack: () => void;
   initialCategory?: string;
+  initialCustomSectionId?: string;
   categories: { value: string; label: string }[];
+  sections: { id: string; name: string }[];
   categoryNames?: Record<string, string>;
 }) {
   const [title, setTitle] = useState("");
@@ -40,6 +45,7 @@ export default function JournalEditor({
   const [tags, setTags] = useState("");
   const [entryType, setEntryType] = useState<ArchiveEntryType>("paragraph");
   const [isCompleted, setIsCompleted] = useState(false);
+  const [customSectionId, setCustomSectionId] = useState(initialCustomSectionId);
 
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
@@ -102,6 +108,7 @@ export default function JournalEditor({
     setTags(entry.tags.join(", "));
     setEntryType(entry.entry_type);
     setIsCompleted(entry.is_completed);
+    setCustomSectionId(entry.custom_sections[0] ?? "");
     setError(null);
     setSaveMessage(null);
     setPreview(false);
@@ -117,6 +124,7 @@ export default function JournalEditor({
     setTags("");
     setEntryType("paragraph");
     setIsCompleted(false);
+    setCustomSectionId("");
     setPreview(false);
     setError(null);
     setSaveMessage(null);
@@ -141,7 +149,7 @@ export default function JournalEditor({
       const response = await fetch(`/api/entries/${entry.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: nextCompleted, mood: entry.mood ?? "", tags: entry.tags }),
+        body: JSON.stringify({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: nextCompleted, custom_sections: entry.custom_sections, mood: entry.mood ?? "", tags: entry.tags }),
       });
       const result = await response.json() as { entry?: ArchiveEntry; error?: string };
       if (!response.ok || !result.entry) throw new Error(result.error ?? "The to-do could not be updated.");
@@ -172,6 +180,7 @@ export default function JournalEditor({
           category,
           entry_type: entryType,
           is_completed: isCompleted,
+          custom_sections: customSectionId ? [customSectionId] : [],
           mood,
           tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
         }),
@@ -281,6 +290,13 @@ export default function JournalEditor({
             {categories.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </div>
+
+        {sections.length > 0 && <label className="block text-xs tracking-widest text-[#c5a77d]">CUSTOM SECTION
+          <select value={customSectionId} onChange={(event) => setCustomSectionId(event.target.value)} className="mt-3 block w-full rounded-xl border border-white/[.09] bg-[#171a17] p-3.5 text-sm tracking-normal text-[#d2cfc4] outline-none transition focus:border-[#c5a77d]/40 md:w-96">
+            <option value="">No custom section</option>
+            {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+          </select>
+        </label>}
 
         {/* Writing area */}
         <div>
@@ -444,6 +460,8 @@ Write freely. This is your space.`}
             {entries.map((entry) => (
               <article
                 key={entry.id}
+                draggable={editingId !== entry.id}
+                onDragStart={(event) => { event.dataTransfer.setData("text/plain", entry.id); event.dataTransfer.effectAllowed = "move"; }}
                 className="rounded-[1.2rem] border border-white/[.075] bg-[linear-gradient(145deg,rgba(31,35,30,.92),rgba(22,24,21,.96))] p-5"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -479,6 +497,7 @@ Write freely. This is your space.`}
                   {entry.tags.map((tag) => (
                     <span key={`${entry.id}-${tag}`}>#{tag}</span>
                   ))}
+                  {entry.custom_sections.map((sectionId) => { const section = sections.find((item) => item.id === sectionId); return section ? <span key={sectionId} className="rounded-full border border-[#c5a77d]/20 px-2 py-1 text-[#cdb184]">{section.name}</span> : null; })}
                 </div>
               </article>
             ))}

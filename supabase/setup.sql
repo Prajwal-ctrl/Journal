@@ -11,6 +11,7 @@ create table if not exists public.archive_entries (
   entry_type text not null default 'paragraph' constraint archive_entries_entry_type_check
     check (entry_type in ('paragraph', 'quick_note', 'todo')),
   is_completed boolean not null default false,
+  custom_sections text[] not null default '{}',
   mood text,
   tags text[] not null default '{}',
   created_at timestamptz not null default now()
@@ -35,7 +36,8 @@ end $$;
 
 alter table public.archive_entries
   add column if not exists entry_type text not null default 'paragraph',
-  add column if not exists is_completed boolean not null default false;
+  add column if not exists is_completed boolean not null default false,
+  add column if not exists custom_sections text[] not null default '{}';
 
 do $$
 begin

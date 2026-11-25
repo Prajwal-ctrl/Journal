@@ -49,7 +49,7 @@ type CustomSection = {
 };
 
 type CustomCategory = { id: string; value: string; name: string };
-type SidebarEntry = { id: string; title: string; category: string; tags: string[]; created_at: string | null };
+type SidebarEntry = { id: string; title: string; content: string; category: string; entry_type: "paragraph" | "quick_note" | "todo"; is_completed: boolean; custom_sections: string[]; mood: string | null; tags: string[]; created_at: string | null };
 
 const builtInCategories = [
   ["journal", "Daily Journal"],
@@ -64,6 +64,7 @@ export default function Home() {
   const [active, setActive] = useState("Overview");
   const [search, setSearch] = useState("");
   const [editorCategory, setEditorCategory] = useState("journal");
+  const [editorSectionId, setEditorSectionId] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -202,10 +203,46 @@ export default function Home() {
     const savedView = customSections.find((section) => key === `custom:${section.id}`);
     const category = savedView ? savedView.category : key === "Life Timeline" ? "all" : categoryBySection[key] ?? "all";
     const tags = savedView?.tags.map((tag) => tag.toLocaleLowerCase()) ?? [];
-    return sidebarEntries.filter((entry) =>
-      (category === "all" || entry.category === category)
-      && tags.every((tag) => entry.tags.some((entryTag) => entryTag.toLocaleLowerCase() === tag)),
-    );
+    return sidebarEntries.filter((entry) => {
+      if (savedView) {
+        if (entry.custom_sections.includes(savedView.id)) return true;
+        if (entry.custom_sections.length > 0) return false;
+        return (category === "all" || entry.category === category)
+          && tags.every((tag) => entry.tags.some((entryTag) => entryTag.toLocaleLowerCase() === tag));
+      }
+      if (entry.custom_sections.length > 0) return false;
+      return category === "all" || entry.category === category;
+    });
+  }
+
+  async function moveSidebarEntry(entryId: string, targetKey: string) {
+    const entry = sidebarEntries.find((item) => item.id === entryId);
+    if (!entry || targetKey === "Overview" || targetKey === "Life Timeline") return;
+    const customSection = customSections.find((section) => targetKey === `custom:${section.id}`);
+    const nextCategory = customSection ? entry.category : categoryBySection[targetKey] ?? entry.category;
+    const nextCustomSections = customSection ? [customSection.id] : [];
+    try {
+      const response = await fetch(`/api/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: entry.title,
+          content: entry.content,
+          category: nextCategory,
+          entry_type: entry.entry_type,
+          is_completed: entry.is_completed,
+          custom_sections: nextCustomSections,
+          mood: entry.mood ?? "",
+          tags: entry.tags,
+        }),
+      });
+      const result = await response.json() as { entry?: SidebarEntry; error?: string };
+      if (!response.ok || !result.entry) throw new Error(result.error ?? "The entry could not be moved.");
+      setSidebarEntries((current) => current.map((item) => item.id === entry.id ? result.entry! : item));
+      window.dispatchEvent(new CustomEvent("archive-entry-updated", { detail: result.entry }));
+    } catch (cause) {
+      window.alert(cause instanceof Error ? cause.message : "The entry could not be moved.");
+    }
   }
 
   function toggleExpandedSection(key: string) {
@@ -226,23 +263,24 @@ export default function Home() {
     const matchingEntries = entriesForSection(item.key);
     const buttonClass = `group flex w-full min-w-0 flex-1 items-center rounded-xl border py-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 ${mobile ? "gap-3 px-3 text-sm" : sidebarCollapsed ? "justify-center px-0 text-[13px]" : "gap-3 px-3 text-[13px]"} ${selected ? "border-[#c5a77d]/15 bg-[#c5a77d]/[.09] text-[#e4c89b] shadow-[inset_2px_0_0_0_#c5a77d]" : "border-transparent text-[#999b92] hover:bg-white/[.035] hover:text-[#eee9de]"}`;
     return (
-      <div key={item.key} className="min-w-0">
+      <div key={item.key} className="min-w-0" onDragOver={(event) => { if (item.key !== "Overview" && item.key !== "Life Timeline") event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain"); if (id) void moveSidebarEntry(id, item.key); }}>
         <div className="flex items-center gap-1">
           <button type="button" aria-current={selected ? "page" : undefined} title={!mobile && sidebarCollapsed ? item.label : undefined} onClick={() => selectSection(item.key)} className={buttonClass}>
-            <Icon size={16} strokeWidth={1.6} />
+            <Icon size={!mobile && sidebarCollapsed ? 21 : 16} strokeWidth={1.6} />
             <span className={!mobile && sidebarCollapsed ? "sr-only" : "truncate"}>{item.label}</span>
           </button>
-          {item.key !== "Overview" && <button type="button" aria-label={`${expanded ? "Collapse" : "Expand"} ${item.label}`} aria-expanded={expanded} onClick={() => toggleExpandedSection(item.key)} className={`flex size-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-white/[.05] hover:text-[#d5b989] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/50 ${expanded ? "rotate-180" : ""}`}><ChevronDown size={16} /></button>}
+          {item.key !== "Overview" && (mobile || !sidebarCollapsed) && <button type="button" aria-label={`${expanded ? "Collapse" : "Expand"} ${item.label}`} aria-expanded={expanded} onClick={() => toggleExpandedSection(item.key)} className={`flex size-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-white/[.05] hover:text-[#d5b989] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/50 ${expanded ? "rotate-180" : ""}`}><ChevronDown size={16} /></button>}
         </div>
-        {expanded && <div className={`mb-2 mt-1 space-y-0.5 border-l border-white/10 pb-1 pl-3 ${mobile ? "ml-4" : "ml-4"}`}>
-          {matchingEntries.length === 0 ? <p className="px-2 py-2 text-[11px] text-gray-600">No notes in this section yet</p> : matchingEntries.map((entry) => <button key={entry.id} type="button" onClick={() => openEntryFromSidebar(entry)} title={entry.title} className="block w-full truncate rounded-md px-2 py-2 text-left text-[11px] leading-4 text-gray-500 transition hover:bg-white/[.04] hover:text-[#e7e1d5]">{entry.title}</button>)}
+        {expanded && (mobile || !sidebarCollapsed) && <div className="mb-2 mt-1 space-y-0.5 border-l border-white/10 pb-1 pl-3 ml-4">
+          {matchingEntries.length === 0 ? <p className="px-2 py-2 text-[11px] text-gray-600">No notes in this section yet</p> : matchingEntries.map((entry) => <button key={entry.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", entry.id); event.dataTransfer.effectAllowed = "move"; }} onClick={() => openEntryFromSidebar(entry)} title={`${entry.title} · drag to move sections`} className="block w-full truncate rounded-md px-2 py-2 text-left text-[11px] leading-4 text-gray-500 transition hover:bg-white/[.04] hover:text-[#e7e1d5]">{entry.title}</button>)}
         </div>}
       </div>
     );
   }
 
-  function openEditor(category: string) {
+  function openEditor(category: string, customSectionId = "") {
     setEditorCategory(category);
+    setEditorSectionId(customSectionId);
     setActive("Editor");
     setMenuOpen(false);
   }
@@ -563,9 +601,11 @@ export default function Home() {
       <section style={{ maxWidth: preferences.width === "focused" ? "1120px" : preferences.width === "full" ? "none" : "1500px" }} className={`relative z-0 mx-auto px-5 py-7 transition-[margin] duration-300 ease-out sm:px-8 md:px-10 md:py-10 xl:px-16 ${sidebarCollapsed ? "md:ml-[84px]" : "md:ml-[280px]"}`}>
         {active === "Editor" ? (
           <JournalEditor
-            key={editorCategory}
+            key={`${editorCategory}-${editorSectionId}`}
             initialCategory={editorCategory}
+            initialCustomSectionId={editorSectionId}
             categories={entryCategoryOptions.map(([value, label]) => ({ value, label }))}
+            sections={customSections.map(({ id, name }) => ({ id, name }))}
             categoryNames={categoryLabels}
             onBack={() => setActive("Overview")}
           />
@@ -577,11 +617,13 @@ export default function Home() {
             category={currentCustomSection ? currentCustomSection.category === "all" ? null : currentCustomSection.category : active === "Life Timeline" ? null : categoryBySection[active] ?? null}
             categoryNames={categoryLabels}
             categoryOptions={entryCategoryOptions.map(([value, label]) => ({ value, label }))}
+            sections={customSections.map(({ id, name }) => ({ id, name }))}
+            customSectionId={currentCustomSection?.id}
             initialTags={currentCustomSection?.tags ?? []}
             onSaveTags={currentCustomSection ? (tags) => persistCustomSections(customSections.map((section) => section.id === currentCustomSection.id ? { ...section, tags } : section)) : undefined}
             initialSearch={active === "Life Timeline" ? search : ""}
             onBack={() => setActive("Overview")}
-            onCreate={() => openEditor(categoryBySection[active] ?? (currentCustomSection && currentCustomSection.category !== "all" ? currentCustomSection.category : "journal"))}
+            onCreate={() => openEditor(categoryBySection[active] ?? (currentCustomSection && currentCustomSection.category !== "all" ? currentCustomSection.category : "journal"), currentCustomSection?.id ?? "")}
           />
         ) : (
           <>

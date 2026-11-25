@@ -17,6 +17,7 @@ type ArchiveEntry = {
   tags: string[];
   entry_type: ArchiveEntryType;
   is_completed: boolean;
+  custom_sections: string[];
   created_at: string | null;
 };
 
@@ -47,6 +48,8 @@ export default function ArchiveCollection({
   initialSearch = "",
   categoryNames = {},
   categoryOptions = [],
+  sections = [],
+  customSectionId,
   onBack,
   onCreate,
   onSaveTags,
@@ -58,6 +61,8 @@ export default function ArchiveCollection({
   initialSearch?: string;
   categoryNames?: Record<string, string>;
   categoryOptions?: CategoryOption[];
+  sections?: { id: string; name: string }[];
+  customSectionId?: string;
   onBack: () => void;
   onCreate: () => void;
   onSaveTags?: (tags: string[]) => void;
@@ -69,7 +74,7 @@ export default function ArchiveCollection({
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ title: "", content: "", category: "journal" as EntryCategory, entry_type: "paragraph" as ArchiveEntryType, is_completed: false, mood: "", tags: "" });
+  const [draft, setDraft] = useState({ title: "", content: "", category: "journal" as EntryCategory, entry_type: "paragraph" as ArchiveEntryType, is_completed: false, custom_section_id: "", mood: "", tags: "" });
   const [savingId, setSavingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -101,19 +106,31 @@ export default function ArchiveCollection({
     };
   }, []);
 
+  useEffect(() => {
+    function handleEntryUpdated(event: Event) {
+      const updated = (event as CustomEvent<ArchiveEntry>).detail;
+      if (updated) setEntries((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+    }
+    window.addEventListener("archive-entry-updated", handleEntryUpdated);
+    return () => window.removeEventListener("archive-entry-updated", handleEntryUpdated);
+  }, []);
+
   const visibleEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     const normalizedTags = selectedTags.map((tag) => tag.toLocaleLowerCase());
     return entries.filter((entry) => {
       const matchesCategory = category === null || entry.category === category;
+      const matchesCustomSection = customSectionId
+        ? entry.custom_sections.includes(customSectionId) || entry.custom_sections.length === 0
+        : category === null || entry.custom_sections.length === 0;
       const entryTags = entry.tags.map((tag) => tag.toLocaleLowerCase());
       const matchesTags = normalizedTags.every((tag) => entryTags.includes(tag));
       const searchableText = [entry.title, entry.content, entry.mood ?? "", ...entry.tags]
         .join(" ")
         .toLocaleLowerCase();
-      return matchesCategory && matchesTags && (!normalizedQuery || searchableText.includes(normalizedQuery));
+      return matchesCategory && matchesCustomSection && matchesTags && (!normalizedQuery || searchableText.includes(normalizedQuery));
     });
-  }, [category, entries, query, selectedTags]);
+  }, [category, customSectionId, entries, query, selectedTags]);
 
   const availableTags = useMemo(
     () => [...new Set(entries.flatMap((entry) => entry.tags.filter(Boolean)))].sort((a, b) => a.localeCompare(b)),
@@ -135,7 +152,7 @@ export default function ArchiveCollection({
   function beginEdit(entry: ArchiveEntry) {
     setActionError(null);
     setEditingId(entry.id);
-    setDraft({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: entry.is_completed, mood: entry.mood ?? "", tags: entry.tags.join(", ") });
+    setDraft({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: entry.is_completed, custom_section_id: entry.custom_sections[0] ?? "", mood: entry.mood ?? "", tags: entry.tags.join(", ") });
   }
 
   async function saveEdit() {
@@ -146,7 +163,7 @@ export default function ArchiveCollection({
       const response = await fetch(`/api/entries/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...draft, mood: draft.mood.trim(), tags: draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean) }),
+        body: JSON.stringify({ ...draft, custom_sections: draft.custom_section_id ? [draft.custom_section_id] : [], mood: draft.mood.trim(), tags: draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean) }),
       });
       const result = (await response.json()) as { entry?: ArchiveEntry; error?: string; metadataSaved?: boolean };
       if (!response.ok || !result.entry) throw new Error(result.error ?? "Your entry could not be updated.");
@@ -183,7 +200,7 @@ export default function ArchiveCollection({
       const response = await fetch(`/api/entries/${entry.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: !entry.is_completed, mood: entry.mood ?? "", tags: entry.tags }),
+        body: JSON.stringify({ title: entry.title, content: entry.content, category: entry.category, entry_type: entry.entry_type, is_completed: !entry.is_completed, custom_sections: entry.custom_sections, mood: entry.mood ?? "", tags: entry.tags }),
       });
       const result = await response.json() as { entry?: ArchiveEntry; error?: string };
       if (!response.ok || !result.entry) throw new Error(result.error ?? "The to-do could not be updated.");
@@ -198,6 +215,8 @@ export default function ArchiveCollection({
     return (
       <article
         key={entry.id}
+        draggable={!isEditing}
+        onDragStart={(event) => { event.dataTransfer.setData("text/plain", entry.id); event.dataTransfer.effectAllowed = "move"; }}
         className="rounded-[1.35rem] border border-white/[.075] bg-[linear-gradient(145deg,rgba(31,35,30,.92),rgba(22,24,21,.96))] p-5 transition-colors hover:border-[#c5a77d]/20 md:p-7"
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -209,11 +228,12 @@ export default function ArchiveCollection({
                 <label className="text-xs text-gray-400">Mood<input maxLength={80} value={draft.mood} onChange={(event) => setDraft({ ...draft, mood: event.target.value })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 text-sm text-gray-200 outline-none" /></label>
               </div>
               <label className="block text-xs text-gray-400">Entry format<select value={draft.entry_type} onChange={(event) => setDraft({ ...draft, entry_type: event.target.value as ArchiveEntryType, is_completed: event.target.value === "todo" ? draft.is_completed : false })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 text-sm text-gray-200 outline-none">{Object.entries(entryTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              {sections.length > 0 && <label className="block text-xs text-gray-400">Custom section<select value={draft.custom_section_id} onChange={(event) => setDraft({ ...draft, custom_section_id: event.target.value })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#101210] px-3 py-2 text-sm text-gray-200 outline-none"><option value="">No custom section</option>{sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}</select></label>}
             </div>
           ) : (
             <div className="flex min-w-0 items-start gap-3">
               {entry.entry_type === "todo" && <button type="button" aria-label={entry.is_completed ? "Mark task incomplete" : "Mark task complete"} aria-pressed={entry.is_completed} onClick={() => toggleTodo(entry)} className="mt-1 shrink-0 text-[#c5a77d]">{entry.is_completed ? <CheckSquare2 size={18} /> : <ListChecks size={18} />}</button>}
-              <div className="min-w-0"><p className="text-xs uppercase tracking-[.18em] text-[#c5a77d]">{categoryLabels[entry.category] ?? categoryNames[entry.category] ?? entry.category ?? "Archive Entry"} <span className="text-gray-600">· {entryTypeLabels[entry.entry_type]}</span></p>{entry.entry_type === "paragraph" && <h3 className="mt-2 font-serif text-xl font-normal text-[#eee9de]">{entry.title}</h3>}</div>
+              <div className="min-w-0"><p className="text-xs uppercase tracking-[.18em] text-[#c5a77d]">{categoryLabels[entry.category] ?? categoryNames[entry.category] ?? entry.category ?? "Archive Entry"} <span className="text-gray-600">· {entryTypeLabels[entry.entry_type]}</span></p>{entry.entry_type === "paragraph" && <h3 className="mt-2 font-serif text-xl font-normal text-[#eee9de]">{entry.title}</h3>}{entry.custom_sections.map((sectionId) => { const section = sections.find((item) => item.id === sectionId); return section ? <span key={sectionId} className="mt-2 inline-block rounded-full border border-[#c5a77d]/20 px-2 py-1 text-[10px] text-[#cdb184]">{section.name}</span> : null; })}</div>
             </div>
           )}
           <span className="flex items-center gap-2 text-xs text-gray-500">
