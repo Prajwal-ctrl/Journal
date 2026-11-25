@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BookOpen,
   Heart,
@@ -20,6 +20,7 @@ import {
 import JournalEditor from "@/components/JournalEditor";
 import ArchiveCollection from "@/components/ArchiveCollection";
 import LockArchiveButton from "@/components/LockArchiveButton";
+import OnThisDay from "@/components/OnThisDay";
 
 const sections = [
   {
@@ -38,6 +39,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [editorCategory, setEditorCategory] = useState("journal");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const navigation = ["Overview", ...sections.map((s) => s.name)];
   const categoryBySection: Record<string, string> = {
@@ -50,6 +52,22 @@ export default function Home() {
     active === "Editor"
       ? Object.keys(categoryBySection).find((section) => categoryBySection[section] === editorCategory)
       : active;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [menuOpen]);
+
+  function getNavigationIcon(item: string) {
+    if (item === "Overview") return LayoutDashboard;
+    return sections.find((section) => section.name === item)?.icon ?? LayoutDashboard;
+  }
 
   function openEditor(category: string) {
     setEditorCategory(category);
@@ -79,84 +97,155 @@ export default function Home() {
         </span>
         <button
           aria-label={menuOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={menuOpen}
+          aria-controls="mobile-archive-navigation"
           onClick={() => setMenuOpen(!menuOpen)}
-          className="flex size-10 items-center justify-center rounded-full border border-white/10 text-gray-300 transition hover:border-[#c5a77d]/40 hover:text-[#d9bd91]"
+          className="relative flex size-11 items-center justify-center rounded-full border border-white/10 bg-white/[.025] text-gray-300 transition duration-200 hover:border-[#c5a77d]/40 hover:bg-[#c5a77d]/[.08] hover:text-[#d9bd91] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60"
         >
-          {menuOpen ? <X /> : <Menu />}
+          <Menu
+            aria-hidden="true"
+            className={`absolute transition duration-200 ${menuOpen ? "rotate-90 scale-50 opacity-0" : "rotate-0 scale-100 opacity-100"}`}
+          />
+          <X
+            aria-hidden="true"
+            className={`absolute transition duration-200 ${menuOpen ? "rotate-0 scale-100 opacity-100" : "-rotate-90 scale-50 opacity-0"}`}
+          />
         </button>
       </div>
 
       {menuOpen && (
-        <div className="relative z-20 space-y-2 border-b border-white/[.07] bg-[#151815] p-5 md:hidden">
-          {navigation.map((item) => (
-            <button
-              key={item}
-              onClick={() => selectSection(item)}
-              className="block w-full rounded-xl px-4 py-3 text-left text-sm text-gray-300 transition hover:bg-white/5 hover:text-[#e0c397]"
-            >
-              {item}
-            </button>
-          ))}
-          <div className="border-t border-white/10 pt-3">
+        <button
+          aria-label="Close navigation menu"
+          onClick={() => setMenuOpen(false)}
+          className="fixed inset-0 z-10 bg-black/55 backdrop-blur-[2px] md:hidden"
+        />
+      )}
+
+      {menuOpen && (
+        <nav
+          id="mobile-archive-navigation"
+          aria-label="Archive navigation"
+          className="archive-menu-enter relative z-20 space-y-2 border-b border-white/[.07] bg-[#151815] p-5 shadow-[0_24px_60px_rgba(0,0,0,.38)] md:hidden"
+        >
+          <p className="px-3 pb-1 text-[10px] tracking-[.22em] text-[#70746a]">YOUR ARCHIVE</p>
+          {navigation.map((item) => {
+            const Icon = getNavigationIcon(item);
+            const selected = selectedNavigation === item;
+
+            return (
+              <button
+                key={item}
+                aria-current={selected ? "page" : undefined}
+                onClick={() => selectSection(item)}
+                className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 ${
+                  selected
+                    ? "border-[#c5a77d]/20 bg-[#c5a77d]/[.09] text-[#e0c397]"
+                    : "border-transparent text-gray-300 hover:bg-white/5 hover:text-[#e0c397]"
+                }`}
+              >
+                <Icon size={17} strokeWidth={1.6} />
+                {item}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => openEditor("journal")}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#cfb184] px-4 py-3 text-sm font-medium text-[#171812] transition hover:bg-[#dfc49a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eee9de]"
+          >
+            <Plus size={16} /> Write an entry
+          </button>
+          <div className="border-t border-white/10 pt-4">
             <LockArchiveButton />
           </div>
-        </div>
+        </nav>
       )}
 
       {/* Desktop sidebar */}
       <aside
-        className="fixed inset-y-0 left-0 z-10 hidden w-[280px] flex-col border-r border-white/[.07] bg-[#101210]/90 p-8 backdrop-blur-xl md:flex"
+        className={`fixed inset-y-0 left-0 z-10 hidden flex-col border-r border-white/[.07] bg-[#101210]/90 backdrop-blur-xl transition-[width,padding] duration-300 ease-out md:flex ${
+          sidebarCollapsed ? "w-[84px] p-4" : "w-[280px] p-8"
+        }`}
       >
-        <div className="font-serif text-[1.35rem] tracking-[.13em]">
-          LIFE<span className="text-[#c5a77d]">.</span>ARCHIVE
+        <div className={`flex min-h-9 items-center ${sidebarCollapsed ? "justify-center" : "justify-between gap-3"}`}>
+          {!sidebarCollapsed && (
+            <span className="font-serif text-[1.2rem] tracking-[.12em]">
+              LIFE<span className="text-[#c5a77d]">.</span>ARCHIVE
+            </span>
+          )}
+          <button
+            type="button"
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!sidebarCollapsed}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            className="hidden size-9 shrink-0 items-center justify-center rounded-full border border-white/10 text-gray-400 transition hover:border-[#c5a77d]/40 hover:bg-[#c5a77d]/[.08] hover:text-[#d9bd91] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 md:flex"
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <Menu size={17} strokeWidth={1.6} />
+          </button>
         </div>
 
-        <p className="mt-2 text-[10px] tracking-[.25em] text-[#85877d]">
-          A PRIVATE LIFE IN REVIEW
-        </p>
+        {!sidebarCollapsed && (
+          <p className="mt-2 text-[10px] tracking-[.25em] text-[#85877d]">
+            A PRIVATE LIFE IN REVIEW
+          </p>
+        )}
 
-        <p className="mb-3 mt-14 px-3 text-[10px] tracking-[.24em] text-[#686c63]">YOUR ARCHIVE</p>
-        <nav className="space-y-1.5">
+        {!sidebarCollapsed && (
+          <p className="mb-3 mt-14 px-3 text-[10px] tracking-[.24em] text-[#686c63]">YOUR ARCHIVE</p>
+        )}
+        <nav aria-label="Archive navigation" className={`space-y-1.5 ${sidebarCollapsed ? "mt-10" : ""}`}>
           {navigation.map((item) => (
-            <button
-              key={item}
-              onClick={() => selectSection(item)}
-              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[13px] transition duration-200 ${
-                selectedNavigation === item
-                  ? "border border-[#c5a77d]/15 bg-[#c5a77d]/[.09] text-[#e4c89b] shadow-[inset_2px_0_0_0_#c5a77d]"
-                  : "border border-transparent text-[#999b92] hover:bg-white/[.035] hover:text-[#eee9de]"
-              }`}
-            >
-              {item === "Overview" ? (
-                <LayoutDashboard size={16} strokeWidth={1.6} />
-              ) : (
-                (() => {
-                  const Icon = sections.find((section) => section.name === item)?.icon;
-                  return Icon ? <Icon size={16} strokeWidth={1.6} /> : null;
-                })()
-              )}
-              {item}
-            </button>
+            (() => {
+              const Icon = getNavigationIcon(item);
+              const selected = selectedNavigation === item;
+
+              return (
+                <button
+                  key={item}
+                  aria-current={selected ? "page" : undefined}
+                  title={sidebarCollapsed ? item : undefined}
+                  onClick={() => selectSection(item)}
+                  className={`group flex w-full items-center rounded-xl border py-3 text-left text-[13px] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/60 ${
+                    sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
+                  } ${
+                    selected
+                      ? "border-[#c5a77d]/15 bg-[#c5a77d]/[.09] text-[#e4c89b] shadow-[inset_2px_0_0_0_#c5a77d]"
+                      : "border-transparent text-[#999b92] hover:bg-white/[.035] hover:text-[#eee9de]"
+                  }`}
+                >
+                  <Icon size={16} strokeWidth={1.6} />
+                  <span className={sidebarCollapsed ? "sr-only" : "truncate"}>{item}</span>
+                </button>
+              );
+            })()
           ))}
         </nav>
 
         <div className="mt-auto">
-          <div className="mb-6 rounded-2xl border border-white/[.07] bg-gradient-to-br from-[#1b201b] to-[#151714] p-4">
-            <Feather size={17} className="text-[#c5a77d]" strokeWidth={1.5} />
-            <p className="mt-3 font-serif text-[15px] leading-6 text-[#ded8c9]">Make room for the moments that matter.</p>
-            <p className="mt-2 text-[11px] leading-5 text-[#85877d]">A quiet place to keep your story close.</p>
-          </div>
-          <div className="flex items-center justify-between border-t border-white/[.07] pt-5">
-            <div className="flex items-center gap-2 text-[10px] tracking-[.16em] text-[#878a80]">
-              <Lock size={12} /> PRIVATE SPACE
+          {sidebarCollapsed ? (
+            <div className="mb-4 flex justify-center rounded-xl border border-white/[.07] bg-gradient-to-br from-[#1b201b] to-[#151714] py-3" title="Make room for the moments that matter">
+              <Feather size={17} className="text-[#c5a77d]" strokeWidth={1.5} />
             </div>
-            <LockArchiveButton />
+          ) : (
+            <div className="mb-6 rounded-2xl border border-white/[.07] bg-gradient-to-br from-[#1b201b] to-[#151714] p-4">
+              <Feather size={17} className="text-[#c5a77d]" strokeWidth={1.5} />
+              <p className="mt-3 font-serif text-[15px] leading-6 text-[#ded8c9]">Make room for the moments that matter.</p>
+              <p className="mt-2 text-[11px] leading-5 text-[#85877d]">A quiet place to keep your story close.</p>
+            </div>
+          )}
+          <div className={`flex items-center border-t border-white/[.07] pt-5 ${sidebarCollapsed ? "justify-center" : "justify-between"}`}>
+            {!sidebarCollapsed && (
+              <div className="flex items-center gap-2 text-[10px] tracking-[.16em] text-[#878a80]">
+                <Lock size={12} /> PRIVATE SPACE
+              </div>
+            )}
+            <LockArchiveButton compact={sidebarCollapsed} />
           </div>
         </div>
       </aside>
 
       {/* Main content */}
-      <section className="relative z-0 mx-auto max-w-[1500px] px-5 py-7 sm:px-8 md:ml-[280px] md:px-10 md:py-10 xl:px-16">
+      <section className={`relative z-0 mx-auto max-w-[1500px] px-5 py-7 transition-[margin] duration-300 ease-out sm:px-8 md:px-10 md:py-10 xl:px-16 ${sidebarCollapsed ? "md:ml-[84px]" : "md:ml-[280px]"}`}>
         {active === "Editor" ? (
           <JournalEditor
             key={editorCategory}
@@ -236,6 +325,8 @@ export default function Home() {
                 </div>
               </div>
             </div>
+
+            <OnThisDay />
 
             {/* Archive sections */}
             <div className="mt-14 flex flex-wrap items-end justify-between gap-4">

@@ -24,5 +24,3 @@ Deploy the repository on Vercel. Add these environment variables for the Product
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (use the Supabase publishable key)
 
 The `.env.local` file is ignored by Git; never commit environment files or a Supabase secret key.
-=======
-# Journal

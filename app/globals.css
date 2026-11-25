@@ -43,3 +43,25 @@ button {
 * {
   scrollbar-color: #514a3b #141714;
 }
+
+@keyframes archive-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.archive-menu-enter {
+  animation: archive-menu-enter 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .archive-menu-enter {
+    animation: none;
+  }
+}

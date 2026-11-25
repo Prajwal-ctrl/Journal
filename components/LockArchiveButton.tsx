@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
-export default function LockArchiveButton() {
+export default function LockArchiveButton({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
 
@@ -27,10 +27,11 @@ export default function LockArchiveButton() {
       type="button"
       onClick={lockArchive}
       disabled={pending}
-      className="flex items-center gap-2 text-xs text-gray-500 transition hover:text-[#d8bc91] disabled:opacity-50"
+      className={`flex items-center gap-2 text-xs text-gray-500 transition hover:text-[#d8bc91] disabled:opacity-50 ${compact ? "justify-center rounded-full p-2" : ""}`}
       aria-label="Lock archive"
+      title={compact ? "Lock archive" : undefined}
     >
-      <Lock size={14} /> {pending ? "LOCKING…" : "LOCK ARCHIVE"}
+      <Lock size={14} /> {!compact && (pending ? "LOCKING…" : "LOCK ARCHIVE")}
     </button>
   );
 }
