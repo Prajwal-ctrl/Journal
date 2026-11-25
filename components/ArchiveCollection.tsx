@@ -36,19 +36,24 @@ export default function ArchiveCollection({
   title,
   description,
   category,
+  initialTags = [],
   initialSearch = "",
   onBack,
   onCreate,
+  onSaveTags,
 }: {
   title: string;
   description: string;
   category: EntryCategory | null;
+  initialTags?: string[];
   initialSearch?: string;
   onBack: () => void;
   onCreate: () => void;
+  onSaveTags?: (tags: string[]) => void;
 }) {
   const [entries, setEntries] = useState<ArchiveEntry[]>([]);
   const [query, setQuery] = useState(initialSearch);
+  const [selectedTags, setSelectedTags] = useState<string[]>(initialTags);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,14 +88,24 @@ export default function ArchiveCollection({
 
   const visibleEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
+    const normalizedTags = selectedTags.map((tag) => tag.toLocaleLowerCase());
     return entries.filter((entry) => {
       const matchesCategory = category === null || entry.category === category;
+      const entryTags = entry.tags.map((tag) => tag.toLocaleLowerCase());
+      const matchesTags = normalizedTags.every((tag) => entryTags.includes(tag));
       const searchableText = [entry.title, entry.content, entry.mood ?? "", ...entry.tags]
         .join(" ")
         .toLocaleLowerCase();
-      return matchesCategory && (!normalizedQuery || searchableText.includes(normalizedQuery));
+      return matchesCategory && matchesTags && (!normalizedQuery || searchableText.includes(normalizedQuery));
     });
-  }, [category, entries, query]);
+  }, [category, entries, query, selectedTags]);
+
+  const availableTags = useMemo(
+    () => [...new Set(entries.flatMap((entry) => entry.tags.filter(Boolean)))].sort((a, b) => a.localeCompare(b)),
+    [entries],
+  );
+  const tagFiltersChanged = initialTags.length !== selectedTags.length
+    || initialTags.some((tag) => !selectedTags.some((selected) => selected.toLocaleLowerCase() === tag.toLocaleLowerCase()));
 
   const timelineGroups = useMemo(() => {
     if (category !== null) return [];
@@ -171,6 +186,24 @@ export default function ArchiveCollection({
           {query.trim() ? " found" : " saved"}
         </p>
       </div>
+
+      {availableTags.length > 0 && (
+        <div className="mt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[10px] tracking-[.18em] text-[#92938a]">FILTER BY TAGS <span className="ml-1 normal-case tracking-normal text-gray-600">(choose any combination)</span></p>
+            <div className="flex items-center gap-4">
+              {onSaveTags && tagFiltersChanged && <button type="button" onClick={() => onSaveTags(selectedTags)} className="text-[11px] text-[#c5a77d] transition hover:text-[#e0c397]">Save to section</button>}
+              {selectedTags.length > 0 && <button type="button" onClick={() => setSelectedTags([])} className="text-[11px] text-[#c5a77d] transition hover:text-[#e0c397]">Clear filters</button>}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {availableTags.map((tag) => {
+              const selected = selectedTags.some((item) => item.toLocaleLowerCase() === tag.toLocaleLowerCase());
+              return <button key={tag} type="button" aria-pressed={selected} onClick={() => setSelectedTags((current) => selected ? current.filter((item) => item.toLocaleLowerCase() !== tag.toLocaleLowerCase()) : [...current, tag])} className={`rounded-full border px-3 py-1.5 text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a77d]/50 ${selected ? "border-[#c5a77d]/40 bg-[#c5a77d]/10 text-[#d5b989]" : "border-white/10 text-gray-400 hover:border-white/20 hover:text-gray-200"}`}>#{tag}</button>;
+            })}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="py-12 text-center text-sm text-gray-500">Loading your archive...</p>
