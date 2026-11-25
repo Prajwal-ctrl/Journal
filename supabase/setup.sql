@@ -17,6 +17,40 @@ create table if not exists public.archive_entries (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.archive_user_settings (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  preferences jsonb not null default '{"accent":"brass","textSize":"default","width":"wide"}'::jsonb,
+  custom_sections jsonb not null default '[]'::jsonb,
+  custom_categories jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.archive_user_settings enable row level security;
+revoke all on table public.archive_user_settings from anon, authenticated;
+grant select, insert, update on table public.archive_user_settings to authenticated;
+
+drop policy if exists "archive_user_settings_select_own" on public.archive_user_settings;
+create policy "archive_user_settings_select_own"
+  on public.archive_user_settings
+  for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "archive_user_settings_insert_own" on public.archive_user_settings;
+create policy "archive_user_settings_insert_own"
+  on public.archive_user_settings
+  for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "archive_user_settings_update_own" on public.archive_user_settings;
+create policy "archive_user_settings_update_own"
+  on public.archive_user_settings
+  for update
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
 -- Allow user-created category slugs while keeping category values constrained.
 alter table public.archive_entries
   drop constraint if exists archive_entries_category_check;

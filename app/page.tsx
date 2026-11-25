@@ -28,6 +28,7 @@ import JournalEditor from "@/components/JournalEditor";
 import ArchiveCollection from "@/components/ArchiveCollection";
 import LockArchiveButton from "@/components/LockArchiveButton";
 import OnThisDay from "@/components/OnThisDay";
+import { DEFAULT_ARCHIVE_SETTINGS, type ArchivePreferences } from "@/lib/archive-settings";
 
 const sections = [
   {
@@ -60,6 +61,15 @@ const builtInCategories = [
   ["future", "Future Me"],
 ];
 
+function readLegacyArchiveValue<T>(key: string, fallback: T): T {
+  try {
+    const saved = window.localStorage.getItem(key);
+    return saved ? JSON.parse(saved) as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function Home() {
   const [active, setActive] = useState("Overview");
   const [search, setSearch] = useState("");
@@ -80,38 +90,60 @@ export default function Home() {
   const [sectionCategory, setSectionCategory] = useState("all");
   const [sectionTags, setSectionTags] = useState("");
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
-  const [preferences, setPreferences] = useState({ accent: "brass", textSize: "default", width: "wide" });
+  const [preferences, setPreferences] = useState<ArchivePreferences>(DEFAULT_ARCHIVE_SETTINGS.preferences);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    let active = true;
+    async function loadSettings() {
       try {
-        const saved = localStorage.getItem("life-archive-preferences");
-        if (!saved) return;
-        const value = JSON.parse(saved) as Record<string, unknown>;
-        setPreferences({
-          accent: ["brass", "sage", "ocean", "rose"].includes(String(value.accent)) ? String(value.accent) : "brass",
-          textSize: ["small", "default", "large"].includes(String(value.textSize)) ? String(value.textSize) : "default",
-          width: ["focused", "wide", "full"].includes(String(value.width)) ? String(value.width) : "wide",
+        const response = await fetch("/api/settings", { cache: "no-store" });
+        const result = await response.json() as { settings?: typeof DEFAULT_ARCHIVE_SETTINGS; hasSettings?: boolean; error?: string };
+        if (!response.ok || !result.settings) throw new Error(result.error ?? "Your archive settings could not be loaded.");
+
+        let settings = result.settings;
+        const legacyKeys = ["life-archive-preferences", "life-archive-sections", "life-archive-categories"];
+        const hasLegacySettings = legacyKeys.some((key) => {
+          try { return window.localStorage.getItem(key) !== null; } catch { return false; }
         });
-      } catch {
-        // Use the default appearance if browser storage is unavailable.
+        if (hasLegacySettings) {
+          const localPreferences = readLegacyArchiveValue("life-archive-preferences", DEFAULT_ARCHIVE_SETTINGS.preferences);
+          const localSections = readLegacyArchiveValue("life-archive-sections", DEFAULT_ARCHIVE_SETTINGS.custom_sections);
+          const localCategories = readLegacyArchiveValue("life-archive-categories", DEFAULT_ARCHIVE_SETTINGS.custom_categories);
+          const sections = Array.isArray(localSections) ? localSections.filter((item): item is CustomSection =>
+            typeof item?.id === "string" && typeof item?.name === "string" && typeof item?.category === "string" && Array.isArray(item?.tags) && item.tags.every((tag: unknown) => typeof tag === "string"),
+          ) : [];
+          const categories = Array.isArray(localCategories) ? localCategories.filter((item): item is CustomCategory =>
+            typeof item?.id === "string" && typeof item?.value === "string" && typeof item?.name === "string",
+          ) : [];
+          const merged = {
+            preferences: result.hasSettings
+              ? JSON.stringify(settings.preferences) === JSON.stringify(DEFAULT_ARCHIVE_SETTINGS.preferences) ? localPreferences : settings.preferences
+              : localPreferences,
+            custom_sections: result.hasSettings
+              ? [...settings.custom_sections, ...sections.filter((section) => !settings.custom_sections.some((current) => current.id === section.id))]
+              : sections,
+            custom_categories: result.hasSettings
+              ? [...settings.custom_categories, ...categories.filter((category) => !settings.custom_categories.some((current) => current.id === category.id || current.value === category.value))]
+              : categories,
+          };
+          const migrated = await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(merged) });
+          const migratedResult = await migrated.json() as { settings?: typeof DEFAULT_ARCHIVE_SETTINGS; error?: string };
+          if (!migrated.ok || !migratedResult.settings) throw new Error(migratedResult.error ?? "Your saved browser settings could not be moved to the database.");
+          settings = migratedResult.settings;
+        }
+        if (!active) return;
+        setPreferences(settings.preferences);
+        setCustomSections(settings.custom_sections);
+        setCustomCategories(settings.custom_categories);
+        legacyKeys.forEach((key) => { try { window.localStorage.removeItem(key); } catch { /* Settings are safely persisted in Supabase. */ } });
+        setSettingsError(null);
+      } catch (cause) {
+        if (active) setSettingsError(cause instanceof Error ? cause.message : "Your archive settings could not be loaded.");
       }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        const saved = localStorage.getItem("life-archive-categories");
-        if (!saved) return;
-        const value = JSON.parse(saved) as unknown;
-        if (Array.isArray(value)) setCustomCategories(value.filter((item): item is CustomCategory => typeof item?.id === "string" && typeof item?.value === "string" && typeof item?.name === "string"));
-      } catch {
-        // Keep built-in categories if browser storage contains invalid data.
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
+    }
+    void loadSettings();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -129,25 +161,18 @@ export default function Home() {
     return () => { current = false; };
   }, [active]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        const saved = localStorage.getItem("life-archive-sections");
-        if (!saved) return;
-        const value = JSON.parse(saved) as unknown;
-        if (Array.isArray(value)) {
-          setCustomSections(value.filter((item): item is CustomSection =>
-            typeof item?.id === "string" && typeof item?.name === "string"
-            && typeof item?.category === "string" && Array.isArray(item?.tags)
-            && item.tags.every((tag: unknown) => typeof tag === "string"),
-          ));
-        }
-      } catch {
-        // Keep default navigation if local storage contains invalid data.
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  async function saveSettings(patch: Record<string, unknown>) {
+    setSettingsError(null);
+    try {
+      const response = await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Your settings could not be saved.");
+      return true;
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : "Your settings could not be saved.");
+      return false;
+    }
+  }
 
   useEffect(() => {
     document.documentElement.style.fontSize = preferences.textSize === "small" ? "15px" : preferences.textSize === "large" ? "18px" : "16px";
@@ -156,11 +181,7 @@ export default function Home() {
 
   function updatePreferences(next: typeof preferences) {
     setPreferences(next);
-    try {
-      localStorage.setItem("life-archive-preferences", JSON.stringify(next));
-    } catch {
-      // Preferences still apply for this session if storage is unavailable.
-    }
+    void saveSettings({ preferences: next });
   }
 
   const navigation = [
@@ -294,18 +315,16 @@ export default function Home() {
     setMenuOpen(false);
   }
 
-  function persistCustomSections(next: CustomSection[]) {
+  async function persistCustomSections(next: CustomSection[]) {
+    const previous = customSections;
     setCustomSections(next);
-    try {
-      localStorage.setItem("life-archive-sections", JSON.stringify(next));
-    } catch {
-      // Sections remain available until the page is closed if storage is unavailable.
-    }
+    if (!await saveSettings({ custom_sections: next })) setCustomSections(previous);
   }
 
-  function persistCustomCategories(next: CustomCategory[]) {
+  async function persistCustomCategories(next: CustomCategory[]) {
+    const previous = customCategories;
     setCustomCategories(next);
-    try { localStorage.setItem("life-archive-categories", JSON.stringify(next)); } catch { /* Keep current-session choices. */ }
+    if (!await saveSettings({ custom_categories: next })) setCustomCategories(previous);
   }
 
   function saveCustomCategory(event: FormEvent<HTMLFormElement>) {
@@ -385,6 +404,7 @@ export default function Home() {
 
   return (
     <main data-accent={preferences.accent} style={{ "--user-accent": ({ brass: "#c5a77d", sage: "#a3b990", ocean: "#8eafb9", rose: "#c8959b" } as Record<string, string>)[preferences.accent] } as CSSProperties} className="relative min-h-screen overflow-hidden bg-[#101210] text-[#eee9de]">
+      {settingsError && <div role="alert" className="fixed left-1/2 top-3 z-[70] w-[min(92vw,36rem)] -translate-x-1/2 rounded-xl border border-rose-300/20 bg-[#241a19] px-4 py-3 text-xs text-rose-200 shadow-xl">{settingsError}</div>}
       {sectionManagerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/65 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) setSectionManagerOpen(false); }}>
           <section role="dialog" aria-modal="true" aria-labelledby="section-manager-title" className="my-auto max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-white/10 bg-[#171a17] p-5 shadow-2xl sm:p-7">
@@ -431,7 +451,7 @@ export default function Home() {
                 return <li key={item.id} className="flex items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="truncate text-sm text-gray-200">{item.name}</p><p className="text-[11px] text-gray-500">{useCount} {useCount === 1 ? "entry" : "entries"}</p></div><div className="flex gap-1"><button type="button" onClick={() => { setEditingCategoryId(item.id); setCategoryName(item.name); }} className="rounded-lg px-2.5 py-2 text-xs text-gray-400 hover:bg-white/5 hover:text-white">Rename</button><button type="button" disabled={useCount > 0 || sectionUses} title={useCount > 0 || sectionUses ? "Reassign entries and sections before deleting this category" : "Delete category"} onClick={() => persistCustomCategories(customCategories.filter((category) => category.id !== item.id))} className="rounded-lg px-2.5 py-2 text-xs text-rose-300 hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-30">Delete</button></div></li>;
               })}</ul>}
             </div>
-            <p className="mt-4 text-[11px] text-gray-600">Custom sections are saved in this browser. Deleting a section never deletes its entries.</p>
+            <p className="mt-4 text-[11px] text-gray-600">Custom sections sync through your private archive database. Deleting a section never deletes its entries.</p>
           </section>
         </div>
       )}
@@ -451,7 +471,7 @@ export default function Home() {
               <legend className="text-xs text-[#b7b7ad]">Accent color</legend>
               <div className="mt-3 flex gap-3">
                 {[{ id: "brass", name: "Brass", color: "#c5a77d" }, { id: "sage", name: "Sage", color: "#a3b990" }, { id: "ocean", name: "Ocean", color: "#8eafb9" }, { id: "rose", name: "Rose", color: "#c8959b" }].map((accent) => (
-                  <button key={accent.id} type="button" aria-label={`${accent.name} accent`} aria-pressed={preferences.accent === accent.id} onClick={() => updatePreferences({ ...preferences, accent: accent.id })} className={`size-9 rounded-full border-2 transition hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${preferences.accent === accent.id ? "border-white" : "border-transparent"}`} style={{ backgroundColor: accent.color }} />
+                  <button key={accent.id} type="button" aria-label={`${accent.name} accent`} aria-pressed={preferences.accent === accent.id} onClick={() => updatePreferences({ ...preferences, accent: accent.id as ArchivePreferences["accent"] })} className={`size-9 rounded-full border-2 transition hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${preferences.accent === accent.id ? "border-white" : "border-transparent"}`} style={{ backgroundColor: accent.color }} />
                 ))}
               </div>
             </fieldset>
@@ -460,7 +480,7 @@ export default function Home() {
               <legend className="text-xs text-[#b7b7ad]">Text size</legend>
               <div className="mt-3 grid grid-cols-3 gap-2">
                 {[{ id: "small", name: "Small" }, { id: "default", name: "Default" }, { id: "large", name: "Large" }].map((size) => (
-                  <button key={size.id} type="button" aria-pressed={preferences.textSize === size.id} onClick={() => updatePreferences({ ...preferences, textSize: size.id })} className={`rounded-lg border px-2 py-2 text-xs transition ${preferences.textSize === size.id ? "border-[#c5a77d]/50 bg-[#c5a77d]/10 text-[#eee9de]" : "border-white/10 text-gray-400 hover:border-white/20"}`}>{size.name}</button>
+                  <button key={size.id} type="button" aria-pressed={preferences.textSize === size.id} onClick={() => updatePreferences({ ...preferences, textSize: size.id as ArchivePreferences["textSize"] })} className={`rounded-lg border px-2 py-2 text-xs transition ${preferences.textSize === size.id ? "border-[#c5a77d]/50 bg-[#c5a77d]/10 text-[#eee9de]" : "border-white/10 text-gray-400 hover:border-white/20"}`}>{size.name}</button>
                 ))}
               </div>
             </fieldset>
@@ -469,11 +489,11 @@ export default function Home() {
               <legend className="text-xs text-[#b7b7ad]">Content width</legend>
               <div className="mt-3 grid grid-cols-3 gap-2">
                 {[{ id: "focused", name: "Focused" }, { id: "wide", name: "Wide" }, { id: "full", name: "Full" }].map((width) => (
-                  <button key={width.id} type="button" aria-pressed={preferences.width === width.id} onClick={() => updatePreferences({ ...preferences, width: width.id })} className={`rounded-lg border px-2 py-2 text-xs transition ${preferences.width === width.id ? "border-[#c5a77d]/50 bg-[#c5a77d]/10 text-[#eee9de]" : "border-white/10 text-gray-400 hover:border-white/20"}`}>{width.name}</button>
+                  <button key={width.id} type="button" aria-pressed={preferences.width === width.id} onClick={() => updatePreferences({ ...preferences, width: width.id as ArchivePreferences["width"] })} className={`rounded-lg border px-2 py-2 text-xs transition ${preferences.width === width.id ? "border-[#c5a77d]/50 bg-[#c5a77d]/10 text-[#eee9de]" : "border-white/10 text-gray-400 hover:border-white/20"}`}>{width.name}</button>
                 ))}
               </div>
             </fieldset>
-            <p className="mt-5 border-t border-white/[.07] pt-4 text-[11px] leading-5 text-gray-500">These choices are saved in this browser and stay private to this device.</p>
+            <p className="mt-5 border-t border-white/[.07] pt-4 text-[11px] leading-5 text-gray-500">These choices are saved to your private database and sync across your devices.</p>
           </section>
         </>
       )}
